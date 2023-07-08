@@ -1,4 +1,5 @@
 data
+.gitignore
 **/__pycache__
 **/*.ipynb
 **/temp
