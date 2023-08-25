@@ -1,6 +1,13 @@
 import pandas as pd
 import torch
+import sys
 from tqdm import trange
+import numpy as np
+from torch.utils.data import Dataset,DataLoader
+
+class Args(object):
+    def __init__(self) -> None:
+        pass
 
 def track2set(path='data/raw/01_tracks.csv'):
     '''
@@ -53,3 +60,49 @@ class Dset(object):
     def frame(self,frameId):
         frame = self.set[frameId].to_dense()
         return frame[frame[:,1]>0]
+    
+    def frange(self,begin_frame=0,end_frame=125):
+        esbf = []
+        for i in range(begin_frame,end_frame):
+            esbf.append(self.frame(i))
+        return esbf
+    
+    def search_track(target_id,begin_frame,end_frame,Dset):
+        track = []
+        for i in range(begin_frame,end_frame):
+            track.append(Dset.set[i][target_id].to_dense()[1:])
+        return torch.stack(track,dim=0)
+    
+class vtp_dataset(Dataset):
+    def __init__(self,Meta) -> None:
+        super().__init__()
+        self.meta_info = Meta
+    def __getitem__(self, index):
+        return self.meta_info[index]
+    def __len__(self):
+        return len(self.meta_info)
+    
+def vtp_dataloader(train_item_idx=None,valid_item_idx=None,test_item_idx=None,batch_size=1):
+    if train_item_idx is not None:
+        train_set = vtp_dataset(train_item_idx)
+        valid_set = vtp_dataset(valid_item_idx)
+        train_loader = DataLoader(train_set,batch_size=batch_size,shuffle=True,num_workers=4,drop_last=True)
+        valid_loader = DataLoader(valid_set,batch_size=1,shuffle=False,num_workers=4,drop_last=True)
+        return train_loader,valid_loader
+    else:
+        test_set = vtp_dataset(test_item_idx)
+        test_loader = DataLoader(test_set,batch_size=1,shuffle=False,num_workers=4,drop_last=True)
+        return test_loader
+
+def data_divide(index_length,rate=0.1):
+    if rate<0 or rate > 1:
+        print('Hould out rate error!')
+        sys.exit()
+
+    index_length = np.arange(index_length)
+    np.random.shuffle(index_length)
+    valid_split_num = int(len(index_length)*rate)
+    valid_set = index_length[:valid_split_num]
+    train_set = index_length[valid_split_num+1:]
+    return [train_set,valid_set]
+
