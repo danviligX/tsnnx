@@ -50,6 +50,6 @@ class Dset(object):
     def __init__(self,path) -> None:
         self.set = torch.load(path)
 
-    def showframe(self,frameId):
+    def frame(self,frameId):
         frame = self.set[frameId].to_dense()
         return frame[frame[:,1]>0]
