@@ -54,8 +54,8 @@ def meta2meta(path='data/raw/01_tracksMeta.csv', frameNum=200):
     return torch.tensor(metaItem)
 
 class Dset(object):
-    def __init__(self,path) -> None:
-        self.set = torch.load(path)
+    def __init__(self,path,device) -> None:
+        self.set = torch.load(path).to(device=device)
 
     def frame(self,frameId):
         frame = self.set[frameId].to_dense()
@@ -67,16 +67,20 @@ class Dset(object):
             esbf.append(self.frame(i))
         return esbf
     
-    def search_track(target_id,begin_frame,end_frame,Dset):
+    def search_track(self,target_id,begin_frame,end_frame):
         track = []
         for i in range(begin_frame,end_frame):
-            track.append(Dset.set[i][target_id].to_dense()[1:])
+            if self.set[i][target_id][1] != 0:
+                track.append(self.set[i][target_id].to_dense()[1:])
         return torch.stack(track,dim=0)
+
+        
     
 class vtp_dataset(Dataset):
-    def __init__(self,Meta) -> None:
+    def __init__(self,use_index) -> None:
         super().__init__()
-        self.meta_info = Meta
+        Meta = torch.load('./data/set/01_trainMeta.pth')
+        self.meta_info = Meta[use_index]
     def __getitem__(self, index):
         return self.meta_info[index]
     def __len__(self):
@@ -101,8 +105,10 @@ def data_divide(index_length,rate=0.1):
 
     index_length = np.arange(index_length)
     np.random.shuffle(index_length)
-    valid_split_num = int(len(index_length)*rate)
-    valid_set = index_length[:valid_split_num]
-    train_set = index_length[valid_split_num+1:]
-    return [train_set,valid_set]
+    split_num = int(len(index_length)*rate)
+
+    valid_set = index_length[:split_num]
+    test_set = index_length[split_num+1:2*split_num]
+    train_set = index_length[2*split_num+1:]
+    return [train_set,valid_set,test_set]
 
