@@ -70,7 +70,7 @@ class Dset(object):
     def search_track(self,target_id,begin_frame,end_frame):
         track = []
         for i in range(begin_frame,end_frame):
-            if self.set[i][target_id][1] != 0:
+            if (self.set[i][target_id][1] !=0) or (self.set[i][target_id][2] !=0) or (self.set[i][target_id][3] != 0) or (self.set[i][target_id][4] !=0):
                 track.append(self.set[i][target_id].to_dense()[1:])
         return torch.stack(track,dim=0)
 
