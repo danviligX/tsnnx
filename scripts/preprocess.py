@@ -7,7 +7,7 @@ import pickle
 
 meta = torch.load('./data/set/01_trainMeta.pth')
 
-dd_index = data_divide(len(meta),rate=0.1)
-with open('./cache/dd_index.pkl','wb') as path:
+dd_index = data_divide(len(meta)/50,rate=0.1)
+with open('./data/index/highD_01_index_50_r01.pkl','wb') as path:
     pickle.dump(dd_index,path)
     path.close()

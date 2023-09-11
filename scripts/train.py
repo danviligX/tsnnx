@@ -12,19 +12,20 @@ from libx.dataio import vtp_dataloader
 
 def main():
     model_name = 'vtp_Flinear'
-    save_path = ''.join(['./models/',model_name,'/',model_name,'_study.pkl'])
+    model_type = '50'
+    save_path = ''.join(['./models/',model_name,'/',model_name,'_',model_type,'_study.pkl'])
 
-    trial = optuna_study(save_dic=save_path,study_name=model_name,trial_num=30)
+    trial = optuna_study(save_dic=save_path,study_name=model_name,trial_num=30,n_job=12)
     
-    dic_path = ''.join(['./models/',model_name,'/trial/trial_',str(trial.number),'.mdic'])
-    args_path = ''.join(['./models/',model_name,'/trial/args_',str(trial.number),'.marg'])
+    dic_path = ''.join(['./models/',model_name,'/trial/',model_type,'_trial_',str(trial.number),'.mdic'])
+    args_path = ''.join(['./models/',model_name,'/trial/',model_type,'_args_',str(trial.number),'.marg'])
     
     error = model_eval(args_dic=args_path,net_dic=dic_path)
     print(error)
 
-def optuna_study(save_dic='./study.pkl',trial_num=5,study_name='study'):
-    study = optuna.create_study(direction='minimize',study_name=study_name)
-    study.optimize(obj_vtp_Flinear,n_trials=trial_num,n_jobs=3)
+def optuna_study(save_dic='./study.pkl',trial_num=5,study_name='study',n_job=-1):
+    study = optuna.create_study(direction='minimize',study_name=study_name,load_if_exists=False)
+    study.optimize(obj_vtp_Flinear,n_trials=trial_num,n_jobs=n_job)
     with open(save_dic,'wb') as path:
         pickle.dump(study,path)
         path.close()

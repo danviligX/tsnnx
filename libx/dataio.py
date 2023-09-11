@@ -103,7 +103,7 @@ def data_divide(index_length,rate=0.1):
         print('Hould out rate error!')
         sys.exit()
 
-    index_length = np.arange(index_length)
+    index_length = np.arange(int(index_length))
     np.random.shuffle(index_length)
     split_num = int(len(index_length)*rate)
 
