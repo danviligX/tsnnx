@@ -12,10 +12,10 @@ from libx.dataio import vtp_dataloader
 
 def main():
     model_name = 'vtp_Flinear'
-    model_type = '50'
+    model_type = 'full'
     save_path = ''.join(['./models/',model_name,'/',model_name,'_',model_type,'_study.pkl'])
 
-    trial = optuna_study(save_dic=save_path,study_name=model_name,trial_num=30,n_job=12)
+    trial = optuna_study(save_dic=save_path,study_name=model_name,trial_num=30,n_job=6)
     
     dic_path = ''.join(['./models/',model_name,'/trial/',model_type,'_trial_',str(trial.number),'.mdic'])
     args_path = ''.join(['./models/',model_name,'/trial/',model_type,'_args_',str(trial.number),'.marg'])

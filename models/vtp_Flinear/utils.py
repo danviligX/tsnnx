@@ -17,8 +17,9 @@ class vtp_Flinear(nn.Module):
 
         self.his_len = args.his_len
         self.pre_len = args.pre_len
+        self.in_feature_num = args.in_feature_num
 
-        self.emabadding = nn.Linear(in_features=4,out_features=self.embadding_size)
+        self.emabadding = nn.Linear(in_features=args.in_feature_num,out_features=self.embadding_size)
         
         self.flinear = nnx.MFLP(dim_list=[self.his_len,self.pre_len],basis_list=[self.basis_num])
 
@@ -36,9 +37,6 @@ class vtp_Flinear(nn.Module):
 
         return out
 
-
-        
-
 def obj_vtp_Flinear(trial):
     args = Args()
 
@@ -50,15 +48,16 @@ def obj_vtp_Flinear(trial):
 
     # task setting
     args.model_name = 'vtp_Flinear'
-    args.model_type = '50'
+    args.data_type = 'full'
     args.pre_len = 125
     args.his_len = 75
+    args.in_feature_num = 4
     args.set_path = './data/set/01_tracks.pth'
     args.meta_path = './data/set/01_trainMeta.pth'
-    args.dd_index_path = './data/index/highD_01_index_50_r01.pkl'
-    args.checkpoint_path = './cache/ckp_' + args.model_name + '_' + args.model_type + '_trial' + str(trial.number) + '.ckp'
-    args.model_state_dic_path = ''.join(['./models/',args.model_name,'/trial/',args.model_type,'_trial_',str(trial.number),'.mdic'])
-    args.args_path = ''.join(['./models/',args.model_name,'/trial/',args.model_type,'_args_',str(trial.number),'.marg'])
+    args.dd_index_path = './data/index/highD_01_index_' + args.data_type + '_r01.pkl'
+    args.checkpoint_path = './cache/ckp_' + args.model_name + '_' + args.data_type + '_trial' + str(trial.number) + '.ckp'
+    args.model_state_dic_path = ''.join(['./models/',args.model_name,'/trial/',args.data_type,'_trial_',str(trial.number),'.mdic'])
+    args.args_path = ''.join(['./models/',args.model_name,'/trial/',args.data_type,'_args_',str(trial.number),'.marg'])
     
     # net initialization parameters
     args.embadding_size = trial.suggest_int("embadding_size", 32, 1024,step=32)
@@ -68,7 +67,7 @@ def obj_vtp_Flinear(trial):
     args.opt = trial.suggest_categorical("optimizer", ["RMSprop", "SGD", "Adam"])
     args.lr = trial.suggest_float("learning_rate", 1e-5, 1e-1, log=True)
     args.batch_size = trial.suggest_int("batch_size", 4, 32,step=4)
-    args.epoch_num = trial.suggest_int("epoch_num",1,20)
+    args.epoch_num = trial.suggest_int("epoch_num",1,30)
     args.ifprune = False
 
     # break point
@@ -156,7 +155,7 @@ def train(net,train_loader,criterion,optimizer,args,dset):
                 args.ifprune = True
                 break
             loss.backward()
-        # print('batch:{},loss:{}'.format(batch_num,loss.item()))
+            # print('batch:{},loss:{}'.format(batch_num,loss.item()))
         if args.ifprune: break
         if args.ifprune: break
         optimizer.step()
