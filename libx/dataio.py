@@ -38,7 +38,7 @@ def meta2meta(path='data/raw/01_tracksMeta.csv', frameNum=200):
         train item meta: [car id, start frame, end frame]
     '''
     data = pd.read_csv(path)
-    calNum = frameNum - 2
+    calNum = frameNum - 1
     metaItem = []
 
     for i in trange(len(data)):
@@ -70,9 +70,13 @@ class Dset(object):
     def search_track(self,target_id,begin_frame,end_frame):
         track = []
         for i in range(begin_frame,end_frame):
-            if (self.set[i][target_id][1] !=0) or (self.set[i][target_id][2] !=0) or (self.set[i][target_id][3] != 0) or (self.set[i][target_id][4] !=0):
+            if torch.norm(self.set[i][target_id]) != 0:
                 track.append(self.set[i][target_id].to_dense()[1:])
         return torch.stack(track,dim=0)
+    
+    def frame_neighbor(self,center_car,frameId):
+        frame = self.frame(frameId=frameId)
+        return frame[frame[:,0]!=center_car]
 
         
     

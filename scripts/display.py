@@ -1,4 +1,9 @@
+import os
+import sys
+
+sys.path.append(os.getcwd())
 import matplotlib.pyplot as plt
+
 from libx.dataio import Dset
 
 path = './data/set/01_tracks.pth'

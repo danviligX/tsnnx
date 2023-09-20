@@ -7,7 +7,6 @@ class Fmap(nn.Module):
     '''
     def __init__(self,in_dim,basis_dim=7) -> None:
         super(Fmap,self).__init__()
-        # basis_dim = basis_dim**in_dim
         self.L_s = nn.Linear(in_features=in_dim,out_features=basis_dim)
         self.L_m = nn.Linear(in_features=2*basis_dim,out_features=1)
     def forward(self,input):
@@ -23,10 +22,8 @@ class Flinear(nn.Module):
         self.out_dim = out_dim
         self.Fls = nn.ModuleList([Fmap(in_dim=in_dim,basis_dim=basis_dim)]*out_dim)
     def forward(self,input):
-        # out = torch.zeros([self.out_dim]).to(next(self.parameters()).device)
         out = []
         for idx, Fl in enumerate(self.Fls):
-            # out[idx] = Fl(input)
             out.append(Fl(input))
         out = torch.concat(out,dim=-1)
         return out
@@ -48,3 +45,76 @@ class MFLP(nn.Module):
             if ifrelu: layers.append(nn.ReLU())
         layers.append(Flinear(in_dim=dim_list[-2],out_dim=dim_list[-1],basis_dim=basis_list[-1]))
         return nn.Sequential(*layers)
+    
+class net_motivation(nn.Module):
+    def __init__(self, args) -> None:
+        super(net_motivation,self).__init__()
+        self.embadding = nn.Linear(in_features=4,out_features=args.embadding_size)
+        self.mflp = MFLP(dim_list=[args.his_len,1],basis_list=args.basis_list)
+        self.deembadding = nn.Linear(in_features=args.embadding_size,out_features=2)
+
+    def forward(self, history):
+        seq = self.embadding(history)
+        seq = seq.transpose(0,1)
+
+        seq = self.mflp(seq)
+        seq = seq.transpose(0,1)
+
+        out = self.deembadding(seq)
+        return out
+
+class net_socialforce(nn.Module):
+    def __init__(self, args) -> None:
+        super(net_socialforce,self).__init__()
+        self.embadding = nn.Linear(in_features=4,out_features=args.embadding_size)
+        self.mflp = MFLP(dim_list=[2*args.embadding_size,args.embadding_size],basis_list=args.basis_list)
+        self.deembadding = nn.Linear(in_features=args.embadding_size,out_features=2)
+
+        self.relu = nn.ReLU()
+        self.zero_mflp = MFLP(dim_list=[args.embadding_size,2],basis_list=args.basis_list)
+    
+    def forward(self, last_position, frame):
+        pos_embad = self.embadding(last_position)
+        nei_embad = self.embadding(frame)
+
+        cn_embad = torch.concat((pos_embad.repeat([len(frame),1]),nei_embad),dim=-1)
+
+        out = self.deembadding(self.mflp(cn_embad)) + self.relu(self.zero_mflp(nei_embad))
+
+        return sum(out)
+
+class net_PhyNet(nn.Module):
+    def __init__(self, args) -> None:
+        super(net_PhyNet,self).__init__()
+        self.tiem_step = args.time_step
+        self.pre_len = args.pre_len
+        self.his_len = args.his_len
+        self.net_mv = net_motivation(args=args)
+        self.net_sf = net_socialforce(args=args)
+
+    def forward(self, history, meta, dset):
+        pre_series = torch.zeros(self.pre_len,4).to(next(self.parameters()).device)
+        center_car = meta[0]
+        bf = meta[1]
+        ef = meta[2]
+
+        for idx in range(self.pre_len):
+            if idx<self.his_len:
+                his_info = torch.concat((history[idx-self.his_len:],pre_series[:idx]))
+            else:
+                his_info = pre_series[-self.his_len:]
+
+            frame_info = dset.frame_neighbor(center_car=center_car,frameId=bf+idx)[:,1:]
+
+            ninfo = self.next_poi(history=his_info,frame=frame_info)
+            pre_series[idx,:] = ninfo + pre_series[idx,:]
+
+        return pre_series
+    
+    def next_poi(self,history,frame):
+        a_mv = self.net_mv(torch.clone(history))
+        a_sf = self.net_sf(torch.clone(history[-1,:]), torch.clone(frame))
+        a = a_mv + a_sf
+        position = a/2*self.tiem_step**2 + history[-1,2:]*self.tiem_step + history[-1,:2]
+        velocity = self.tiem_step*a + history[-1,2:]
+        return torch.concat((position,velocity),dim=-1)
