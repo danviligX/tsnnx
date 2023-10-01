@@ -46,7 +46,7 @@ def meta2meta(path='data/raw/01_tracksMeta.csv', frameNum=200):
         ef = data.loc[i,'finalFrame']
         cid = data.loc[i,'id']
 
-        if ef - sf >= calNum:
+        if ef - sf > calNum:
             for j in range(sf+calNum,ef + 1):
                 item = [cid, j-calNum, j]
                 metaItem.append(item)
@@ -83,7 +83,8 @@ class Dset(object):
 class vtp_dataset(Dataset):
     def __init__(self,use_index) -> None:
         super().__init__()
-        Meta = torch.load('./data/set/01_trainMeta.pth')
+        # Meta = torch.load('./data/set/01_trainMeta.pth')
+        Meta = torch.load('./data/set/01_trainMeta_200.pth')
         self.meta_info = Meta[use_index]
     def __getitem__(self, index):
         return self.meta_info[index]

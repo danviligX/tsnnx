@@ -49,7 +49,7 @@ class MFLP(nn.Module):
 class net_motivation(nn.Module):
     def __init__(self, args) -> None:
         super(net_motivation,self).__init__()
-        self.embadding = nn.Linear(in_features=4,out_features=args.embadding_size)
+        self.embadding = nn.Linear(in_features=2,out_features=args.embadding_size)
         self.mflp = MFLP(dim_list=[args.his_len,1],basis_list=args.basis_list)
         self.deembadding = nn.Linear(in_features=args.embadding_size,out_features=2)
 
@@ -66,7 +66,7 @@ class net_motivation(nn.Module):
 class net_socialforce(nn.Module):
     def __init__(self, args) -> None:
         super(net_socialforce,self).__init__()
-        self.embadding = nn.Linear(in_features=4,out_features=args.embadding_size)
+        self.embadding = nn.Linear(in_features=2,out_features=args.embadding_size)
         self.mflp = MFLP(dim_list=[2*args.embadding_size,args.embadding_size],basis_list=args.basis_list)
         self.deembadding = nn.Linear(in_features=args.embadding_size,out_features=2)
 
@@ -75,7 +75,7 @@ class net_socialforce(nn.Module):
     
     def forward(self, last_position, frame):
         pos_embad = self.embadding(last_position)
-        nei_embad = self.embadding(frame)
+        nei_embad = self.embadding(frame[:,:2])
 
         cn_embad = torch.concat((pos_embad.repeat([len(frame),1]),nei_embad),dim=-1)
 
@@ -92,6 +92,9 @@ class net_PhyNet(nn.Module):
         self.net_mv = net_motivation(args=args)
         self.net_sf = net_socialforce(args=args)
 
+        self.p2v = Flinear(in_dim=2,out_dim=2,basis_dim=128)
+        
+
     def forward(self, history, meta, dset):
         pre_series = torch.zeros(self.pre_len,4).to(next(self.parameters()).device)
         center_car = meta[0]
@@ -100,21 +103,26 @@ class net_PhyNet(nn.Module):
 
         for idx in range(self.pre_len):
             if idx<self.his_len:
-                his_info = torch.concat((history[idx-self.his_len:],pre_series[:idx]))
+                his_info = torch.concat((history[idx-self.his_len:,:],pre_series[:idx]))
             else:
                 his_info = pre_series[-self.his_len:]
 
             frame_info = dset.frame_neighbor(center_car=center_car,frameId=bf+idx)[:,1:]
 
-            ninfo = self.next_poi(history=his_info,frame=frame_info)
+            ninfo = self.next_poi(history=his_info,frame=frame_info[:,:])
             pre_series[idx,:] = ninfo + pre_series[idx,:]
 
         return pre_series
     
     def next_poi(self,history,frame):
-        a_mv = self.net_mv(torch.clone(history))
-        a_sf = self.net_sf(torch.clone(history[-1,:]), torch.clone(frame))
+        a_mv = self.net_mv(torch.clone(history[:,:2]))
+        a_sf = self.net_sf(torch.clone(history[-1,:2]), torch.clone(frame))
         a = a_mv + a_sf
+        # print(a.shape)
+        # print(history.shape)
+        
         position = a/2*self.tiem_step**2 + history[-1,2:]*self.tiem_step + history[-1,:2]
+        a = self.p2v(a)
         velocity = self.tiem_step*a + history[-1,2:]
         return torch.concat((position,velocity),dim=-1)
+        # return position

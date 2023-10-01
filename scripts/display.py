@@ -28,3 +28,17 @@ for track in car_track:
     plt.plot(x,y)
     plt.arrow(x[-1],y[-1],0.01*(x[-1]-x[-2]),0.01*(y[-1]-y[-2]),head_width=0.2,color='limegreen')
 plt.show()
+
+def show_FLinear_1024():
+    f = open('./logs/FLinearNet_1024.log','r')
+
+    el = []
+    for line in f.readlines(0):
+        if line[0]=='t':
+            idx = line.find('error')
+            el.append(float(line[idx+6:-1]))
+
+    import matplotlib.pylab as plt
+    plt.plot(range(len(el)),el)
+    plt.show()
+            
