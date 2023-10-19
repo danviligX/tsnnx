@@ -15,6 +15,7 @@ class FLinearNet(nn.Module):
         self.embad = nn.Linear(in_features=2,out_features=self.embadding_size)
 
         self.L_s = nn.Linear(in_features=self.his_len,out_features=self.basis_num*self.his_len)
+        # self.L_s = nn.Linear(in_features=self.his_len,out_features=self.pre_len) # Linear
         self.L_m = nn.Linear(in_features=self.basis_num*self.his_len*2,out_features=self.pre_len)
         self.relu = nn.ReLU()
 
@@ -37,15 +38,15 @@ def Obj_FlinearNet():
     args = Args()
     trial = Args()
     
-    trial.number = 0
+    trial.number = 4
 
     if torch.cuda.is_available():
-        args.device = torch.device("cuda:1")
+        args.device = torch.device("cuda:2")
     else:
         args.device = torch.device("cpu")
 
     # task setting
-    args.model_name = 'FlinearNet_1024_13'
+    args.model_name = 'FLinear_basis_Net'
     args.data_type = '400'
     args.pre_len = 123
     args.his_len = 75
@@ -60,8 +61,8 @@ def Obj_FlinearNet():
     args.model_state_dic_path = ''.join(['./models/',args.model_name,'/trial/',args.data_type,'_trial_',str(trial.number),'.mdic'])
     args.args_path = ''.join(['./models/',args.model_name,'/trial/',args.data_type,'_args_',str(trial.number),'.marg'])
 
-    args.embadding_size = 1024
-    args.basis_num = 13
+    args.embadding_size = 256
+    args.basis_num = 512
 
     args.opt = 'Adam'
     args.lr = 0.0001

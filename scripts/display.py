@@ -29,7 +29,7 @@ for track in car_track:
     plt.arrow(x[-1],y[-1],0.01*(x[-1]-x[-2]),0.01*(y[-1]-y[-2]),head_width=0.2,color='limegreen')
 plt.show()
 
-def show_FLinear_1024():
+def show_log():
     f = open('./logs/FLinearNet_1024.log','r')
 
     el = []

@@ -54,7 +54,7 @@ def meta2meta(path='data/raw/01_tracksMeta.csv', frameNum=200):
     return torch.tensor(metaItem)
 
 class Dset(object):
-    def __init__(self,path,device) -> None:
+    def __init__(self,path='./data/set/01_tracks.pth',device='cpu') -> None:
         self.set = torch.load(path).to(device=device)
 
     def frame(self,frameId):

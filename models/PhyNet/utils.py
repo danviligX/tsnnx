@@ -12,7 +12,7 @@ def obj_PhyNet():
     trial = Args()
 
     # trial num
-    trial.number = 0
+    trial.number = 5
 
     # cuda
     if torch.cuda.is_available():
@@ -21,13 +21,13 @@ def obj_PhyNet():
         args.device = torch.device("cpu")
 
     # task setting
-    args.model_name = 'PhyNet'
+    args.model_name = 'FPhy2aNet'
     args.data_type = '400'
-    args.pre_len = 124
+    args.pre_len = 123
     args.his_len = 75
     args.in_feature_num = 4
     args.time_step = 0.04
-    args.basis_list = [7]
+    args.basis_list = [256]
     args.set_path = './data/set/01_tracks.pth'
     args.meta_path = './data/set/01_trainMeta.pth'
     args.dd_index_path = './data/index/highD_01_index_' + args.data_type + '_r01.pkl'
@@ -38,7 +38,7 @@ def obj_PhyNet():
     args.args_path = ''.join(['./models/',args.model_name,'/trial/',args.data_type,'_args_',str(trial.number),'.marg'])
 
     # net initialization parameters
-    args.embadding_size = 512
+    args.embadding_size = 256
     args.basis_num = 13
 
     # training hyperparameters
@@ -98,7 +98,7 @@ def obj_PhyNet():
                     optimizer=opt,args=args,dset=data,epoch_num=epoch)
         
         epoch_error = valid(net,valid_loader,criterion,data,args)
-        print('trial:{}, epoch:{}, loss:{}'.format(trial.number,epoch,epoch_error.item()))
+        print('trial:{}, epoch:{}, error:{}'.format(trial.number,epoch,epoch_error.item()))
 
         if epoch%5==0:
             if ESS == epoch_error.item(): break

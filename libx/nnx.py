@@ -92,6 +92,9 @@ class net_PhyNet(nn.Module):
         self.net_mv = net_motivation(args=args)
         self.net_sf = net_socialforce(args=args)
 
+        self.net_mv_v = net_motivation(args=args)
+        self.net_sf_v = net_socialforce(args=args)
+
         self.p2v = Flinear(in_dim=2,out_dim=2,basis_dim=128)
         
 
@@ -118,11 +121,15 @@ class net_PhyNet(nn.Module):
         a_mv = self.net_mv(torch.clone(history[:,:2]))
         a_sf = self.net_sf(torch.clone(history[-1,:2]), torch.clone(frame))
         a = a_mv + a_sf
+
+        a_mv_v = self.net_mv_v(torch.clone(history[:,:2]))
+        a_sf_v = self.net_sf_v(torch.clone(history[-1,:2]), torch.clone(frame))
+        a_v = a_mv_v + a_sf_v
         # print(a.shape)
         # print(history.shape)
         
         position = a/2*self.tiem_step**2 + history[-1,2:]*self.tiem_step + history[-1,:2]
-        a = self.p2v(a)
-        velocity = self.tiem_step*a + history[-1,2:]
+        # a = self.p2v(a)
+        velocity = self.tiem_step*a_v + history[-1,2:]
         return torch.concat((position,velocity),dim=-1)
         # return position
