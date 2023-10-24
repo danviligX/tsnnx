@@ -125,11 +125,10 @@ class net_PhyNet(nn.Module):
         a_mv_v = self.net_mv_v(torch.clone(history[:,:2]))
         a_sf_v = self.net_sf_v(torch.clone(history[-1,:2]), torch.clone(frame))
         a_v = a_mv_v + a_sf_v
-        # print(a.shape)
-        # print(history.shape)
         
         position = a/2*self.tiem_step**2 + history[-1,2:]*self.tiem_step + history[-1,:2]
-        # a = self.p2v(a)
+        a = self.p2v(a)
         velocity = self.tiem_step*a_v + history[-1,2:]
         return torch.concat((position,velocity),dim=-1)
-        # return position
+
+        

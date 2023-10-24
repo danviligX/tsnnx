@@ -55,7 +55,7 @@ def meta2meta(path='data/raw/01_tracksMeta.csv', frameNum=200):
 
 class Dset(object):
     def __init__(self,path='./data/set/01_tracks.pth',device='cpu') -> None:
-        self.set = torch.load(path).to(device=device)
+        self.set = torch.load(path).to_dense().to(device=device)
 
     def frame(self,frameId):
         frame = self.set[frameId].to_dense()
@@ -69,17 +69,17 @@ class Dset(object):
     
     def search_track(self,target_id,begin_frame,end_frame):
         track = []
-        for i in range(begin_frame,end_frame):
+        for i in range(begin_frame,end_frame+1):
             if torch.norm(self.set[i][target_id]) != 0:
-                track.append(self.set[i][target_id].to_dense()[1:])
-        return torch.stack(track,dim=0)
+                track.append(self.set[i][target_id].to_dense())
+        return torch.stack(track,dim=1)
     
     def frame_neighbor(self,center_car,frameId):
         frame = self.frame(frameId=frameId)
         return frame[frame[:,0]!=center_car]
 
+
         
-    
 class vtp_dataset(Dataset):
     def __init__(self,use_index) -> None:
         super().__init__()
@@ -95,7 +95,7 @@ def vtp_dataloader(train_item_idx=None,valid_item_idx=None,test_item_idx=None,ba
     if train_item_idx is not None:
         train_set = vtp_dataset(train_item_idx)
         valid_set = vtp_dataset(valid_item_idx)
-        train_loader = DataLoader(train_set,batch_size=batch_size,shuffle=True,num_workers=4,drop_last=True)
+        train_loader = DataLoader(train_set,batch_size=batch_size,shuffle=False,num_workers=4,drop_last=True)
         valid_loader = DataLoader(valid_set,batch_size=1,shuffle=False,num_workers=4,drop_last=True)
         return train_loader,valid_loader
     else:
@@ -103,13 +103,14 @@ def vtp_dataloader(train_item_idx=None,valid_item_idx=None,test_item_idx=None,ba
         test_loader = DataLoader(test_set,batch_size=1,shuffle=False,num_workers=4,drop_last=True)
         return test_loader
 
-def data_divide(index_length,rate=0.1):
+def data_divide(index_length,rate=0.1,shuffle=True):
     if rate<0 or rate > 1:
         print('Hould out rate error!')
         sys.exit()
 
     index_length = np.arange(int(index_length))
-    np.random.shuffle(index_length)
+    if shuffle==True:
+        np.random.shuffle(index_length)
     split_num = int(len(index_length)*rate)
 
     valid_set = index_length[:split_num]
