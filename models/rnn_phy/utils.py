@@ -1,100 +1,39 @@
 from libx.dataio import Args, Dset, vtp_dataloader
+from libx.nnx import rnn_phy
 import torch.nn as nn
 import os
 import pickle
 import torch
 
-class FLinearNet(nn.Module):
-    def __init__(self,args) -> None:
-        super(FLinearNet,self).__init__()
-        self.basis_num = args.basis_num
-        self.embadding_size = args.embadding_size
-        self.his_len = args.his_len
-        self.pre_len = args.pre_len
-        self.time_step = args.time_step
-
-        # embadding and relu layer
-        self.embad = nn.Linear(in_features=4,out_features=self.embadding_size)
-        self.relu = nn.ReLU()
-
-        # motivation layer
-        self.L_s = nn.Linear(in_features=self.his_len,out_features=self.basis_num*self.his_len)
-        self.L_m = nn.Linear(in_features=self.basis_num*self.his_len*2,out_features=1)
-        
-        self.comb = nn.Linear(in_features=self.embadding_size,out_features=2)
-
-        # socialforce layer
-        self.SL_s = nn.Linear(in_features=4,out_features=self.basis_num*2)
-        self.SL_m = nn.Linear(in_features=self.basis_num*2,out_features=1)
-        self.Scomb = nn.Linear(in_features=self.embadding_size,out_features=2)
-
-    def forward(self,input,neighbors):
-        mf = self.motivation(input)
-        sf = self.socialfoce(input,neighbors)
-        a = mf + sf
-
-        position = a/2*self.time_step**2 + input[-1,2:]*self.time_step + input[-1,:2]
-        velocity = self.time_step*a + input[-1,2:]
-        return torch.concat((position,velocity),dim=-1)
-    
-    def motivation(self,input):
-        x = self.embad(input)
-        x = x.transpose(0,1)
-        
-        x = self.L_s(x)
-        x = self.L_m(torch.concat((torch.sin(x),torch.cos(x)),dim=-1))
-        x = self.relu(x)
-        x = x.transpose(0,1)
-
-        out = self.comb(x)
-
-        return out
-    
-    def socialfoce(self,input,neighbors):
-        pos_emb = self.embad(input)
-        nei_emb = self.embad(neighbors)
-
-        cn_embad = torch.stack((pos_emb.repeat([len(neighbors),1]),nei_emb),dim=0)
-        cn_embad.transpose(0,2)
-
-        x = self.SL_s(cn_embad)
-        x = self.SL_m(torch.concat((torch.sin(x),torch.cos(x)),dim=-1))
-        x = self.relu(x)
-        x.transpose(0,2)
-
-        out = self.Scomb(x)
-        return sum(out)
-
-
-def Obj_FlinearNet():
+def Obj_rnn_phy():
     args = Args()
     trial = Args()
     
     trial.number = 0
 
     if torch.cuda.is_available():
-        args.device = torch.device("cuda:1")
+        args.device = torch.device("cuda:0")
     else:
         args.device = torch.device("cpu")
 
     # task setting
-    args.model_name = 'PhyFLinearNet'
-    args.data_type = '400'
-    args.pre_len = 123
+    args.model_name = 'rnn_phy'
+    args.data_type = '1'
+    args.pre_len = 125
     args.his_len = 75
-    args.in_feature_num = 2
+    args.in_feature_num = 4
     args.time_step = 0.04
     # args.basis_list = [7]
     args.set_path = './data/set/01_tracks.pth'
     args.meta_path = './data/set/01_trainMeta.pth'
-    args.dd_index_path = './data/index/highD_01_index_' + args.data_type + '_r01.pkl'
+    args.dd_index_path = './data/index/highD_01_index_' + args.data_type + '_r02_Meta_1.pth'
 
     args.checkpoint_path = './cache/ckp_' + args.model_name + '_' + args.data_type + '_trial_' + str(trial.number) + '.ckp'
     args.model_state_dic_path = ''.join(['./models/',args.model_name,'/trial/',args.data_type,'_trial_',str(trial.number),'.mdic'])
     args.args_path = ''.join(['./models/',args.model_name,'/trial/',args.data_type,'_args_',str(trial.number),'.marg'])
 
-    args.embadding_size = 1024
-    args.basis_num = 13
+    args.embedding_size = 256
+    args.rnn_hidden_size = 1028
 
     args.opt = 'Adam'
     args.lr = 0.0001
@@ -114,14 +53,12 @@ def Obj_FlinearNet():
 
     args.epoch_num = 500
     
-    net = FLinearNet(args=args).to(device=args.device)
+    net = rnn_phy(args=args).to(device=args.device)
     opt = getattr(torch.optim, args.opt)(net.parameters(), lr=args.lr)
     criterion = nn.MSELoss()
 
     data = Dset(args.set_path,args.device)
-    with open(args.dd_index_path,'rb') as path:
-        dd_index = pickle.load(path)
-        path.close()
+    dd_index = torch.load(args.dd_index_path)
 
     train_loader,valid_loader = vtp_dataloader(train_item_idx=dd_index[0],
                                                               valid_item_idx=dd_index[1],
@@ -168,11 +105,11 @@ def train(net,train_loader,criterion,optimizer,args,dset,epoch_num):
         optimizer.zero_grad()
         for _,meta_item in enumerate(batched_meta):
             # forward
-            track = dset.search_track(target_id=meta_item[0],begin_frame=meta_item[1],end_frame=meta_item[2])
-            neighbor = dset.frame_neighbor(center_car=meta_item[0],frameId=meta_item[1])[:,1:]
-            out = net(input=track[:args.his_len,:],neighbors=neighbor)
-            
-            loss = criterion(track[args.his_len:,:2],out[:,:2])
+            frame_info = dset.frame(meta_item[1]+args.his_len-1)
+            Tracks = dset.search_track(frame_info[:,0].int().cpu().numpy(),meta_item[1],meta_item[1]+args.his_len-1)
+            out = net(Tracks)
+
+            loss = criterion(dset.search_track(frame_info[:,0].int().cpu().numpy(),meta_item[2]-args.pre_len+1,meta_item[2])[:,:,1:3],out[:,:,:2])
             loss.backward()
         print('epoch:{},batch:{},loss:{}'.format(epoch_num,batch_num,loss))
         optimizer.step()
@@ -186,9 +123,11 @@ def valid(net,valid_loader,criterion,dset,args):
             meta_item = batched_one_meta[0]
             
             # forward
-            track = dset.search_track(target_id=meta_item[0],begin_frame=meta_item[1],end_frame=meta_item[2])
-            out = net(input=track[:args.his_len,:2])
-            loss = criterion(track[-1,:2],out[-1,:2])
+            frame_info = dset.frame(meta_item[1]+args.his_len-1)
+            Tracks = dset.search_track(frame_info[:,0].int().cpu().numpy(),meta_item[1],meta_item[1]+args.his_len-1)
+            out = net(Tracks)
+
+            loss = criterion(dset.search_track(frame_info[:,0].int().cpu().numpy(),meta_item[2]-args.pre_len+1,meta_item[2])[:,:,1:3],out[:,:,:2])
 
             loss_tensor = torch.tensor([loss.item()])
             error = torch.concat((loss_tensor,error))

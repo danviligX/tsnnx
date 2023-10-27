@@ -131,4 +131,107 @@ class net_PhyNet(nn.Module):
         velocity = self.tiem_step*a_v + history[-1,2:]
         return torch.concat((position,velocity),dim=-1)
 
+class sp_model(nn.Module):
+    def __init__(self,args) -> None:
+        super(sp_model,self).__init__()
+        self.d_model = args.rnn_hidden_size + 2
+        self.encoder_num = 3
+
+        self.hidden_size = args.rnn_hidden_size
+
+        encoder_layer = nn.TransformerEncoderLayer(d_model=self.d_model,nhead=10)
+        self.encoder = nn.TransformerEncoder(encoder_layer=encoder_layer,num_layers=self.encoder_num)
+
+        self.linear = nn.Linear(in_features=self.d_model,out_features=self.hidden_size)
+    def forward(self,SHidden_position):
+        '''
+        SHidden_position: [N,(rnn_hidden_size+2)]
+        out: [N,rnn_hidden_size]
+        '''
+        out = self.encoder(SHidden_position)
+        out = self.linear(out)
+        return out
+
+class rnn_phy(nn.Module):
+    def __init__(self,args) -> None:
+        super(rnn_phy,self).__init__()
+        self.embedding_size = args.embedding_size
+        self.hidden_size = args.rnn_hidden_size
+        self.pre_len = args.pre_len
+        self.dt = args.time_step
+
+        self.embedding = nn.Linear(in_features=args.in_feature_num,out_features=self.embedding_size)
+        self.rnn_cell = nn.LSTMCell(input_size=self.embedding_size,hidden_size=self.hidden_size)
+        self.sp_model = sp_model(args=args)
+
+        self.pre_unit_1 = nn.Sequential(
+            nn.Linear(self.hidden_size,self.hidden_size),
+            nn.ReLU(),
+        )
+
+        self.pre_unit_2 = nn.Sequential(
+            nn.Linear(self.hidden_size,self.hidden_size),
+            nn.ReLU(),
+        )
+
+        self.pre_linear = nn.Linear(self.hidden_size,2)
+
+    def forward(self,Tracks):
+        '''
+        Given a Tracks of [N_neighbor, len_his, 5],
+        Output future tracks
+        '''
+        idx = Tracks[:,0,0]!=0
+        input = Tracks[idx,0,1:]
+        hidden,cell = self.rnn_cell(self.embedding(input))
+        Shidden = self.sp_model(torch.concat((hidden,input[:,:2]),dim=1))
+        preinfo = []
+
+        cid_o = [0]
+
+        # encode
+        for i in range(Tracks.shape[1]):
+            idx = Tracks[:,i,0]!=0
+            cid = Tracks[idx,i,0]
+            if len(cid) > len(cid_o) and i>1:
+                ztensor_hidden = torch.zeros([len(cid),Shidden.shape[1]]).to(next(self.parameters()).device)
+                ztensor_cell = torch.zeros([len(cid),cell.shape[1]]).to(next(self.parameters()).device)
+                for cid_idx,id in enumerate(cid_o):
+                    ztensor_hidden[cid==id] = Shidden[cid_idx]
+                    ztensor_cell[cid==id] = cell[cid_idx]
+                Shidden = ztensor_hidden
+                cell = ztensor_cell
+                
+            input = Tracks[idx,i,1:]
+            Shidden,cell = self.rm_sp(input=input,hidden_cell=(Shidden,cell))
+            cid_o = cid
         
+        current_frame = Tracks[:,-1,1:]
+        # decode
+        for i in range(self.pre_len):
+            x = self.pre_unit_1(Shidden) + Shidden
+            x = self.pre_unit_2(x) + x
+            out_a = self.pre_linear(x)
+            
+            out = self.phy_part(out_a,torch.clone(current_frame)) 
+            preinfo.append(out)
+            current_frame = out
+
+            Shidden,cell = self.rm_sp(input=out,hidden_cell=(Shidden,cell))
+
+        return torch.stack(preinfo,dim=1)
+
+    def rm_sp(self,input,hidden_cell):
+        '''
+        hidden: [N,rnn_hidden_szie]
+        cell: [N,rnn_hidden_size]
+        input: [N,5]
+        '''
+        hidden,cell = self.rnn_cell(self.embedding(input),hidden_cell)
+        Shidden = self.sp_model(torch.concat((hidden,input[:,:2]),dim=1))
+        return Shidden,cell
+    
+    def phy_part(self,a,cf):
+        cf[:,2:] = a*self.dt + cf[:,2:]
+        cf[:,:2] = a*self.dt**2/2 + cf[:,2:]*self.dt + cf[:,:2]
+        return cf

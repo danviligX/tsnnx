@@ -39,7 +39,8 @@ def meta2meta(path='data/raw/01_tracksMeta.csv', frameNum=200):
     '''
     data = pd.read_csv(path)
     calNum = frameNum - 1
-    metaItem = []
+    metaItem_1 = []
+    metaItem_2 = []
 
     for i in trange(len(data)):
         sf = data.loc[i,'initialFrame']
@@ -49,9 +50,12 @@ def meta2meta(path='data/raw/01_tracksMeta.csv', frameNum=200):
         if ef - sf > calNum:
             for j in range(sf+calNum,ef + 1):
                 item = [cid, j-calNum, j]
-                metaItem.append(item)
+            if data.loc[i,'drivingDirection'] == 1:
+                metaItem_1.append(item)
+            elif data.loc[i,'drivingDirection'] == 2:
+                metaItem_2.append(item)
 
-    return torch.tensor(metaItem)
+    return torch.tensor(metaItem_1),torch.tensor(metaItem_2)
 
 class Dset(object):
     def __init__(self,path='./data/set/01_tracks.pth',device='cpu') -> None:
