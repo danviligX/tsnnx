@@ -82,13 +82,21 @@ class Dset(object):
         frame = self.frame(frameId=frameId)
         return frame[frame[:,0]!=center_car]
 
-
+    def mod_by_direction(self,meta):
+        '''
+        sub_dset: a Dset class, initialized with dset where used to store the new sub dest
+        '''
+        cid = meta[:,0].unique()
+        for car in self.set[:,:,0].unique():
+            if car in cid: continue
+            else: self.set[:,car.int(),:] = torch.zeros_like(self.set[:,car.int(),:])
         
 class vtp_dataset(Dataset):
     def __init__(self,use_index) -> None:
         super().__init__()
         # Meta = torch.load('./data/set/01_trainMeta.pth')
-        Meta = torch.load('./data/set/01_trainMeta_200.pth')
+        # Meta = torch.load('./data/set/01_trainMeta_200.pth')
+        Meta = torch.load('./data/set/01_Meta_1.pth')
         self.meta_info = Meta[use_index]
     def __getitem__(self, index):
         return self.meta_info[index]

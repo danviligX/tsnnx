@@ -1,18 +1,18 @@
 from libx.dataio import Args, Dset, vtp_dataloader
 from libx.nnx import rnn_phy
 import torch.nn as nn
+import time
 import os
-import pickle
 import torch
 
 def Obj_rnn_phy():
     args = Args()
     trial = Args()
     
-    trial.number = 0
+    trial.number = 3
 
     if torch.cuda.is_available():
-        args.device = torch.device("cuda:0")
+        args.device = torch.device("cuda:1")
     else:
         args.device = torch.device("cpu")
 
@@ -28,17 +28,17 @@ def Obj_rnn_phy():
     args.meta_path = './data/set/01_trainMeta.pth'
     args.dd_index_path = './data/index/highD_01_index_' + args.data_type + '_r02_Meta_1.pth'
 
-    args.checkpoint_path = './cache/ckp_' + args.model_name + '_' + args.data_type + '_trial_' + str(trial.number) + '.ckp'
-    args.model_state_dic_path = ''.join(['./models/',args.model_name,'/trial/',args.data_type,'_trial_',str(trial.number),'.mdic'])
-    args.args_path = ''.join(['./models/',args.model_name,'/trial/',args.data_type,'_args_',str(trial.number),'.marg'])
+    args.checkpoint_path = './cache/ckp_' + args.model_name + '_' +str(int(time.time())) + '_trial_' + str(trial.number) + '.ckp'
+    args.model_state_dic_path = ''.join(['./models/',args.model_name,'/trial_p/',str(int(time.time())),'_trial_',str(trial.number),'.mdic'])
+    args.args_path = ''.join(['./models/',args.model_name,'/trial_p/',str(int(time.time())),'_args_',str(trial.number),'.marg'])
 
     args.embedding_size = 256
     args.rnn_hidden_size = 1028
 
     args.opt = 'Adam'
     args.lr = 0.0001
-    args.batch_size = 8
-    args.epoch_num = 500
+    args.batch_size = 22
+    args.epoch_num = 100
     args.ifprune = False
     args.ifresume = False
 
@@ -57,7 +57,9 @@ def Obj_rnn_phy():
     opt = getattr(torch.optim, args.opt)(net.parameters(), lr=args.lr)
     criterion = nn.MSELoss()
 
+    Meta = torch.load('./d1t.pth').to(args.device)
     data = Dset(args.set_path,args.device)
+    data.mod_by_direction(Meta)
     dd_index = torch.load(args.dd_index_path)
 
     train_loader,valid_loader = vtp_dataloader(train_item_idx=dd_index[0],
@@ -95,6 +97,10 @@ def Obj_rnn_phy():
 
         valid_error = torch.concat((valid_error,epoch_error))
 
+        if epoch_error.item() == valid_error.min().item():
+            torch.save(net.state_dict(),args.model_state_dic_path)
+            torch.save(args,args.args_path)
+    
     torch.save(net.state_dict(),args.model_state_dic_path)
     torch.save(args,args.args_path)
 
@@ -108,10 +114,16 @@ def train(net,train_loader,criterion,optimizer,args,dset,epoch_num):
             frame_info = dset.frame(meta_item[1]+args.his_len-1)
             Tracks = dset.search_track(frame_info[:,0].int().cpu().numpy(),meta_item[1],meta_item[1]+args.his_len-1)
             out = net(Tracks)
+            # target_Tracks = dset.search_track(meta_item[0].item(),meta_item[2]-args.pre_len+1,meta_item[2]).transpose(0,1)
+            T = dset.search_track(frame_info[:,0].int().cpu().numpy(),meta_item[2]-args.pre_len+1,meta_item[2])
 
-            loss = criterion(dset.search_track(frame_info[:,0].int().cpu().numpy(),meta_item[2]-args.pre_len+1,meta_item[2])[:,:,1:3],out[:,:,:2])
+            loss = criterion(T[:,:,1:],out)
+            # target = target_Tracks[:,1:3]
+            
+            #print(target_Tracks)
+            # loss = criterion(target,out[frame_info[:,0]==meta_item[0],:,:2][0])
             loss.backward()
-        print('epoch:{},batch:{},loss:{}'.format(epoch_num,batch_num,loss))
+        print('epoch:{},batch:{},loss:{},time:{}'.format(epoch_num,batch_num,loss,time.ctime()))
         optimizer.step()
     return net
 
@@ -126,8 +138,10 @@ def valid(net,valid_loader,criterion,dset,args):
             frame_info = dset.frame(meta_item[1]+args.his_len-1)
             Tracks = dset.search_track(frame_info[:,0].int().cpu().numpy(),meta_item[1],meta_item[1]+args.his_len-1)
             out = net(Tracks)
+            target_Tracks = dset.search_track(meta_item[0],meta_item[2]-args.pre_len+1,meta_item[2]).transpose(0,1)
+            target = target_Tracks[:,1:3]
 
-            loss = criterion(dset.search_track(frame_info[:,0].int().cpu().numpy(),meta_item[2]-args.pre_len+1,meta_item[2])[:,:,1:3],out[:,:,:2])
+            loss = criterion(target[-1],out[frame_info[:,0]==meta_item[0],-1,:2][0])
 
             loss_tensor = torch.tensor([loss.item()])
             error = torch.concat((loss_tensor,error))

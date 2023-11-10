@@ -193,7 +193,7 @@ class rnn_phy(nn.Module):
         for i in range(Tracks.shape[1]):
             idx = Tracks[:,i,0]!=0
             cid = Tracks[idx,i,0]
-            if len(cid) > len(cid_o) and i>1:
+            if len(cid) > len(cid_o) and i>0:
                 ztensor_hidden = torch.zeros([len(cid),Shidden.shape[1]]).to(next(self.parameters()).device)
                 ztensor_cell = torch.zeros([len(cid),cell.shape[1]]).to(next(self.parameters()).device)
                 for cid_idx,id in enumerate(cid_o):
