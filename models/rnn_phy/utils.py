@@ -9,7 +9,7 @@ def Obj_rnn_phy():
     args = Args()
     trial = Args()
     
-    trial.number = 3
+    trial.number = 4
 
     if torch.cuda.is_available():
         args.device = torch.device("cuda:1")
@@ -28,7 +28,7 @@ def Obj_rnn_phy():
     args.meta_path = './data/set/01_trainMeta.pth'
     args.dd_index_path = './data/index/highD_01_index_' + args.data_type + '_r02_Meta_1.pth'
 
-    args.checkpoint_path = './cache/ckp_' + args.model_name + '_' +str(int(time.time())) + '_trial_' + str(trial.number) + '.ckp'
+    args.checkpoint_path = './cache/ckp_' + args.model_name + '_'  + '_trial_' + str(trial.number) + '.ckp'
     args.model_state_dic_path = ''.join(['./models/',args.model_name,'/trial_p/',str(int(time.time())),'_trial_',str(trial.number),'.mdic'])
     args.args_path = ''.join(['./models/',args.model_name,'/trial_p/',str(int(time.time())),'_args_',str(trial.number),'.marg'])
 
@@ -36,9 +36,9 @@ def Obj_rnn_phy():
     args.rnn_hidden_size = 1028
 
     args.opt = 'Adam'
-    args.lr = 0.0001
-    args.batch_size = 22
-    args.epoch_num = 100
+    args.lr = 0.001
+    args.batch_size = 4
+    args.epoch_num = 300
     args.ifprune = False
     args.ifresume = False
 
@@ -100,6 +100,7 @@ def Obj_rnn_phy():
         if epoch_error.item() == valid_error.min().item():
             torch.save(net.state_dict(),args.model_state_dic_path)
             torch.save(args,args.args_path)
+            print('Weight update with EOV:{}'.format(epoch_error.item())) # EOV: error on valid set
     
     torch.save(net.state_dict(),args.model_state_dic_path)
     torch.save(args,args.args_path)
