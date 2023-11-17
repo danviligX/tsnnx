@@ -9,10 +9,10 @@ def Obj_rnn_phy():
     args = Args()
     trial = Args()
     
-    trial.number = 4
+    trial.number = 5
 
     if torch.cuda.is_available():
-        args.device = torch.device("cuda:1")
+        args.device = torch.device("cuda:2")
     else:
         args.device = torch.device("cpu")
 
@@ -36,8 +36,8 @@ def Obj_rnn_phy():
     args.rnn_hidden_size = 1028
 
     args.opt = 'Adam'
-    args.lr = 0.001
-    args.batch_size = 4
+    args.lr = 0.0001
+    args.batch_size = 22
     args.epoch_num = 300
     args.ifprune = False
     args.ifresume = False
