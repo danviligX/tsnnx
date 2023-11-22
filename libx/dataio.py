@@ -21,10 +21,10 @@ def track2set(path='data/raw/01_tracks.csv'):
     max_frame = data['frame'].max() + 1
     max_id = data['id'].max() + 1
 
-    set = torch.zeros([max_frame,max_id,6])
+    set = torch.zeros([max_frame,max_id,7])
     for i in trange(len(data)):
         # Setting properties
-        t = [data['id'][i],data['x'][i],data['y'][i],data['xVelocity'][i],data['yVelocity'][i],data['laneId'][i]]
+        t = [data['id'][i],data['x'][i],data['y'][i],data['xVelocity'][i],data['yVelocity'][i],data['xAcceleration'][i],data['yAcceleration'][i]]
         value = torch.tensor(t)
         set[data['frame'][i]][data['id'][i]] = value
 
