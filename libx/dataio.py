@@ -107,7 +107,7 @@ class AniTrack():
     def load(self,Tracks):
         self.Tracks = Tracks
     
-    def init(self, ifline=False, figsize=(20,6), gridlim=[0,412.5,0,36]):
+    def init(self, ifline=False, figsize=(20,1.7), gridlim=[0,412.5,0,36]):
         self.fig = plt.figure(figsize=figsize)
         img = plt.imread('./data/raw/01_highway.png')
         plt.imshow(img,extent=gridlim)
@@ -128,7 +128,7 @@ class AniTrack():
         init_x = x[x!=0]
         init_y = y[y!=0]
 
-        self.p_ani = plt.plot(init_x,init_y,'ro')
+        self.p_ani = plt.plot(init_x,init_y,'r.',markersize='3')
         plt.xlim(gridlim[:2])
         plt.ylim(gridlim[2:])
         # plt.grid(ls='--')
