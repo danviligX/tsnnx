@@ -80,6 +80,18 @@ class Dset(object):
                 track.append(self.set[i][target_id].to_dense())
         return torch.stack(track,dim=1)
     
+    def get_Tracks(self,meta_id,meta):
+        '''
+        get the tracks of meta as well as the neighbors at the end frames of the meta
+        '''
+        item = meta[meta_id]
+        track = self.search_track(item[0],item[1],item[2]).transpose(0,1)
+
+        nei_cid = self.frame_neighbor(item[0],item[2])[:,0]
+        nei_track = self.search_track(nei_cid.long(),item[1],item[2]).transpose(0,1)
+
+        return torch.concatenate((track.unsqueeze(1),nei_track),dim=1)
+
     def frame_neighbor(self,center_car,frameId):
         frame = self.frame(frameId=frameId)
         return frame[frame[:,0]!=center_car]
