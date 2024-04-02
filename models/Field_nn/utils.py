@@ -1,6 +1,8 @@
 import pandas as pd
 import torch
 import torch.nn as nn
+import numpy as np
+import random
 
 class highD():
     def __init__(self,
@@ -8,7 +10,7 @@ class highD():
                     recordingMeta_path = './data/raw/13_recordingMeta.csv',
                     tracksMeta_path = './data/raw/13_tracksMeta.csv',
                     cache = False,
-                    device='cuda'
+                    device='cpu'
                 ) -> None:
         
         self.tracks_path = tracks_path
@@ -18,6 +20,7 @@ class highD():
         self.trackMeta = pd.read_csv(self.tracksMeta_path)
         self.track = pd.read_csv(self.tracks_path)
         self.recordingMeta = pd.read_csv(self.recordingMeta_path)
+        self.ifcache = cache
 
         index = self.trackMeta.loc[:]['drivingDirection'] == 1
         self.dir1_vid = list(self.trackMeta['id'][index])
@@ -26,8 +29,8 @@ class highD():
         self.norm_value_center = torch.tensor([201.7, 25.5, -3, 0])
         self.norm_value_scaler = torch.tensor([435, 36.5, 85.6, 3.6])
         
-    
     def gen_dset(self, ifnorm=True):
+        if self.ifcache: return 0
         data = self.track
         
         max_frame = data['frame'].max() + 1
@@ -83,42 +86,114 @@ class highD():
         frame = self.frame(frameId=frameId)
         return frame[frame[:,0]!=center_car]
 
-def get_data(item, 
-             highD_data
-             ):
-    
-    ego_id = item[0]
-    # ego_cls = item[1:3]
-    Ninfo = []
-    trackMeta = highD_data.trackMeta
-    for fid in item[4:]:
-        frame = highD_data.frame(fid)
-        frame_nei = frame[frame[:,0]!=ego_id]
-        P = frame[frame[:,0]==ego_id,1:3]
-        V = frame[frame[:,0]==ego_id,3:5]
-        Pn = frame_nei[:,1:3]
-        Vn = frame_nei[:,3:5]
-        Idn = frame_nei[:,0]
-        Cn = []
-        for id in Idn:
-            if trackMeta['class'][trackMeta['id']==id.item()].iloc[0]=='Truck':
-                Cn.append([0,1])
-            elif trackMeta['class'][trackMeta['id']==id.item()].iloc[0]=='Car':
-                Cn.append([1,0])
-        Cn = torch.tensor(Cn).to(highD_data.device)
-        idx = [i.item() in highD_data.dir1_vid for i in Idn]
+    def gen_ItemMeta(self):
+        if self.ifcache: return 0
+        ItemMeta = []
+        for i in range(len(self.dir1_trackMeta)):
+            item = self.dir1_trackMeta.iloc[i]
+            if item['numFrames']<250: continue
 
-        Ninfo.append((P,V,Pn[idx],Vn[idx],Cn[idx],Idn[idx]))
+            vec = np.array([0,0,0,0])
+            vec[0] = item['id']
+            if item['class'] == 'Car':
+                vec[1] = 1
+            elif item['class'] == 'Truck':
+                vec[2] = 1
+            vec[3] = item['numLaneChanges']
 
+            frames = []
+            temp = []
+            for fid in range(item['initialFrame']+25,item['finalFrame']-25,5):
+                temp.append(fid)
+                if len(temp) == 40:
+                    frames.append(temp)
+                    if vec[3] != 0:
+                        temp = list(map(lambda x:x+2,temp))
+                        frames.append(temp)
+                        temp = list(map(lambda x:x-2,temp))
+                        frames.append(temp)
+                    temp = []
+
+            for flist in frames:
+                item = np.concatenate((vec,np.array(flist)))
+                ItemMeta.append(item)
         
+        ItemMeta_np = np.stack(ItemMeta)
 
-    return Ninfo
+        index_LaneC = ItemMeta_np[:,3]!=0
+        index_LaneK = ItemMeta_np[:,3]==0
 
-class net(nn.Module):
+        ItemMeta_LK_np = ItemMeta_np[index_LaneK]
+        ItemMeta_LC_np = ItemMeta_np[index_LaneC]
+
+        ItemMeta_d = np.concatenate((ItemMeta_LK_np[:200],ItemMeta_LC_np))
+
+        self.ItenMeta_d = ItemMeta_d
+
+    def get_itemdata(self,item):
+        if self.ifcache: return 0
+        ego_id = item[0]
+        # ego_cls = item[1:3]
+        Ninfo = []
+        trackMeta = self.trackMeta
+        for fid in item[4:]:
+            frame = self.frame(fid)
+            frame_nei = frame[frame[:,0]!=ego_id]
+            P = frame[frame[:,0]==ego_id,1:3]
+            V = frame[frame[:,0]==ego_id,3:5]
+            Pn = frame_nei[:,1:3]
+            Vn = frame_nei[:,3:5]
+            Idn = frame_nei[:,0]
+            Cn = []
+            for id in Idn:
+                if trackMeta['class'][trackMeta['id']==id.item()].iloc[0]=='Truck':
+                    Cn.append([0,1])
+                elif trackMeta['class'][trackMeta['id']==id.item()].iloc[0]=='Car':
+                    Cn.append([1,0])
+            Cn = torch.tensor(Cn).to(self.device)
+            idx = [i.item() in self.dir1_vid for i in Idn]
+
+            Ninfo.append((P,V,Pn[idx],Vn[idx],Cn[idx],Idn[idx]))
+
+        return Ninfo
+    
+    def gen_data_iform(self):
+        if self.ifcache: return 0
+        info_input_net = []
+        for item_meta in self.ItenMeta_d:
+            info = self.get_itemdata(item_meta)
+            info_input_net.append(info)
+        
+        self.input_info = info_input_net
+    
+    def gen_dataloader(self, batch_size=25, shuffle=True,ratio=[0.1,0.1]):
+        if self.ifcache:
+            self.train_data = torch.load('./cache/train.dloader')
+            self.valid_data = torch.load('./cache/valid.dloader')
+            self.test_data = torch.load('./cache/test.dloader')
+            return 0
+        
+        if ratio[0]+ratio[1]>1: raise ValueError("Ratio should be less than 1")
+        if shuffle: random.shuffle(self.input_info)
+        item_num = len(self.input_info)
+        div_num_train = int(item_num*ratio[0])
+        div_num_valid = int(item_num*(ratio[0]+ratio[1]))
+        n1 = div_num_train%batch_size
+        n2 = (div_num_valid+n1)%batch_size
+
+        self.train_data = self.input_info[:div_num_train-n1]
+        self.valid_data = self.input_info[div_num_train-n1:div_num_valid-n2]
+        self.test_data = self.input_info[div_num_valid-n2:]
+
+        torch.save(self.train_data,'./cache/train.dloader')
+        torch.save(self.valid_data,'./cache/valid.dloader')
+        torch.save(self.test_data,'./cache/test.dloader')
+
+class ff_net(nn.Module):
     def __init__(self):
-        super(net,self).__init__()
+        super(ff_net,self).__init__()
         # self.Er_net = self.gen_Er_net()
-        self.leaky_rule = nn.LeakyReLU(0.1)
+        self.leaky_relu = nn.LeakyReLU(0.1)
         self.sfm = nn.Softmax(dim=0)
         self.LaneMark = torch.tensor([13.55,17.45,21.12,24.91]).cuda()
 
@@ -145,7 +220,7 @@ class net(nn.Module):
         delta_y = torch.tensor(list(map(lambda x:x-ego_y, self.LaneMark))).cuda()
         x = self.sfm(self.Er_Linear_sel(delta_y))*delta_y
         x = torch.concat(self.auge(x))
-        x = self.leaky_rule(self.Er_Linaer_map(x))
+        x = self.leaky_relu(self.Er_Linaer_map(x))
         x = self.Er_Linaer_efc(x)
         return x
 
@@ -186,19 +261,19 @@ class net(nn.Module):
         data_aug = [data,sin,sqr,cub,exp,inv,inv_sin,inv_sqr,inv_cub,inv_exp]
 
         return data_aug
-    
-    
+     
     def layer_stack(self,dim_list):
         layers = []
         for dim_in, dim_out in zip(dim_list[:-2],dim_list[1:-1]):
             layers.append(nn.Linear(in_features=dim_in,out_features=dim_out))
-            layers.append(self.leaky_rule)
+            layers.append(self.leaky_relu)
         layers.append(nn.Linear(in_features=dim_list[-2],out_features=dim_list[-1]))
         return nn.Sequential(*layers)
     
     def forward(self,data_item):
-        ego_y = data_item.ego_y
+        ego_p, ego_v, Pn, Vn, Cn, Idn = data_item
 
-        Er = self.Er_net(ego_y)
-        # En = self.En_net(Pn,Pego,Vn,Vego,Cn)
-        pass
+        Er = self.Er_net(ego_p[1])
+        En = self.En_net(Pn,ego_p,Vn,ego_v,Cn)
+        
+        return Er + En
