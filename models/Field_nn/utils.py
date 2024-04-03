@@ -166,7 +166,7 @@ class highD():
         
         self.input_info = info_input_net
     
-    def gen_dataloader(self, batch_size=25, shuffle=True,ratio=[0.1,0.1]):
+    def gen_dataloader(self, batch_size=25, shuffle=True,ratio=[0.8,0.1]):
         if self.ifcache:
             self.train_data = torch.load('./cache/train.dloader')
             self.valid_data = torch.load('./cache/valid.dloader')
@@ -273,7 +273,7 @@ class ff_net(nn.Module):
     def forward(self,data_item):
         ego_p, ego_v, Pn, Vn, Cn, Idn = data_item
 
-        Er = self.Er_net(ego_p[1])
+        Er = self.Er_net(ego_p[0,1])
         En = self.En_net(Pn,ego_p,Vn,ego_v,Cn)
         
         return Er + En
