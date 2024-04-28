@@ -1,4 +1,5 @@
 import torch
+import os
 import torch.nn as nn
 from libx.dataio import Args
 from models.Field_nn.utils import highD, ff_net
@@ -9,11 +10,12 @@ def main():
     args.name = 'Field_nn'
     args.dt = 0.2
     args.opt = 'Adam'
-    args.lr = 0.001
-    args.batch_size = 30
-    args.epoch_num = 700
-    args.state_dic_path = './models/Field_nn/trial/'
-    args.device_ids = list(range(torch.cuda.device_count()))  # 25-108,20min;13-78,20-40
+    args.lr = 1e-4
+    args.batch_size = 50
+    args.epoch_num = 40*300
+    args.state_dic_path = './models/Field_nn/trial_4/'
+    if os.path.exists(args.state_dic_path) is False: os.mkdir(args.state_dic_path)
+    args.device_ids = list(range(torch.cuda.device_count()))
 
     highD_data = highD(cache = True,device=args.device_ids[0])
     print('Generate Dset')
@@ -36,7 +38,7 @@ def main():
     for epoch in range(args.epoch_num):
         args.net = train(args,epoch)
         error = valid(args,epoch)
-        print('epoch:{}, error:{}'.format(epoch,error.item()))
+        print('NUM:{}, epoch:{}, error:{}, max:{}, min:{}'.format(epoch, epoch%39,error.mean().item(),error.max().item(),error.min().item()))
         torch.save(args.net.state_dict(),args.state_dic_path+'_'+str(epoch)+".mdic")
     # acc = test()
     # print(acc)
@@ -53,22 +55,30 @@ def train(args,epoch):
     batch_count = 0
 
     for item in data:
-        if batch_count==args.batch_size:
-            batch_count = 0
-            opt.step()
-            opt.zero_grad()
+        # if batch_count==args.batch_size:
+        #     batch_count = 0
+        #     opt.step()
+        #     opt.zero_grad()
         
-        batch_count = batch_count + 1
+        # batch_count = batch_count + 1
         sel_fid = (epoch+batch_count)%39
         frame_in = item[sel_fid]
         frame_out = item[sel_fid+1]
         pos_rel = frame_out[0].to(args.device_ids[0])
+        vel_rel = frame_out[1].to(args.device_ids[0])
 
         net_out = net(frame_in)
-        pos_pre = net_out*dt*dt/2 + frame_in[1].to(args.device_ids[0])*dt
-        loss = criterion(pos_pre,pos_rel)
+        pos_pre = frame_in[0] + net_out*dt*dt/2 + frame_in[1].to(args.device_ids[0])*dt
+        vel_pre = frame_in[1] + net_out*dt
+        tpr = pos_rel*args.data.norm_value_scaler[:2].cuda()+args.data.norm_value_center[:2].cuda()
+        tpp = pos_pre*args.data.norm_value_scaler[:2].cuda()+args.data.norm_value_center[:2].cuda()
+        tvr = vel_rel*args.data.norm_value_scaler[2:].cuda()+args.data.norm_value_center[2:].cuda()
+        tvp = vel_pre*args.data.norm_value_scaler[2:].cuda()+args.data.norm_value_center[2:].cuda()
+        loss = criterion(tpp,tpr) + criterion(tvr,tvp)
         loss.backward()
         # print('epoch:{},loss:{}'.format(epoch,loss.item()))
+    opt.step()
+    opt.zero_grad()
     return net
 
 def valid(args,epoch):
@@ -86,11 +96,13 @@ def valid(args,epoch):
             pos_rel = frame_out[0].to(args.device_ids[0])
 
             net_out = net(frame_in)
-            pos_pre = net_out*dt*dt/2 + frame_in[1].to(args.device_ids[0])*dt
-            loss = criterion(pos_pre,pos_rel)
+            pos_pre = frame_in[0] + net_out*dt*dt/2 + frame_in[1].to(args.device_ids[0])*dt
+            tpr = pos_rel*args.data.norm_value_scaler[:2].cuda()+args.data.norm_value_center[:2].cuda()
+            tpp = pos_pre*args.data.norm_value_scaler[:2].cuda()+args.data.norm_value_center[:2].cuda()
+            loss = criterion(tpp,tpr)
             error.append(loss.item())
 
-    return torch.tensor(error).mean()
+    return torch.tensor(error)
 
 def test(args):
     data = args.data.valid_data

@@ -198,23 +198,74 @@ class ff_net(nn.Module):
         self.LaneMark = torch.tensor([13.55,17.45,21.12,24.91]).cuda()
 
         # Er part
-        Er_basis_num = 8
+        Er_basis_num = 128
         self.Er_Linear_sel = nn.Linear(in_features=4,out_features=4)
-        self.Er_Linaer_map = nn.Linear(in_features=32+Er_basis_num*2,out_features=Er_basis_num)
+        # self.Er_Linaer_map = nn.Linear(in_features=32+Er_basis_num*2,out_features=Er_basis_num)
+        self.Er_Linaer_map = self.En_mlp = nn.Sequential(*[
+            nn.Linear(in_features=Er_basis_num*2+32,out_features=1024),
+            nn.Sigmoid(),
+            nn.Linear(in_features=1024,out_features=512),
+            nn.LeakyReLU(0.1),
+            nn.Linear(in_features=512,out_features=128),
+            nn.LeakyReLU(0.1),
+            nn.Linear(in_features=128,out_features=Er_basis_num)
+        ])
         self.Er_Linaer_efc = nn.Linear(in_features=Er_basis_num,out_features=2)
         self.aug_sin0 = nn.Linear(in_features=4,out_features=Er_basis_num)
+        self.aug_ensin0 = nn.Linear(in_features=Er_basis_num,out_features=Er_basis_num)
 
         # En part
-        En_basis_num = 17
+        En_basis_num = 512
         self.aug_sin1 = nn.Linear(in_features=2,out_features=En_basis_num)
+        self.aug_ensin1 = nn.Linear(in_features=En_basis_num,out_features=En_basis_num)
         self.En_mlp = nn.Sequential(*[
-            nn.Linear(in_features=En_basis_num*2+80,out_features=256),
+            nn.Linear(in_features=En_basis_num*4+46,out_features=1024),
+            # nn.Sigmoid(),
+            # nn.Linear(in_features=1024,out_features=1024),
             nn.LeakyReLU(0.1),
+            nn.Linear(in_features=1024,out_features=1024)
+        ])
+
+        self.En_mlp2 = nn.Sequential(*[
+            # nn.Linear(in_features=1024,out_features=1024),
+            # nn.Sigmoid(),
+            nn.Linear(in_features=1024,out_features=1024),
+            nn.LeakyReLU(0.1),
+            nn.Linear(in_features=1024,out_features=1024)
+        ])
+
+        # self.En_mlp3 = nn.Sequential(*[
+        #     # nn.Linear(in_features=1024,out_features=1024),
+        #     # nn.Sigmoid(),
+        #     nn.Linear(in_features=1024,out_features=1024),
+        #     nn.LeakyReLU(0.1),
+        #     nn.Linear(in_features=1024,out_features=1024)
+        # ])
+
+        # self.En_mlp4 = nn.Sequential(*[
+        #     # nn.Linear(in_features=1024,out_features=1024),
+        #     # nn.Sigmoid(),
+        #     nn.Linear(in_features=1024,out_features=1024),
+        #     nn.LeakyReLU(0.1),
+        #     nn.Linear(in_features=1024,out_features=1024)
+        # ])
+
+        self.En_mlp5 = nn.Sequential(*[
+            nn.Linear(in_features=1024,out_features=512),
+            nn.Sigmoid(),
+            nn.Linear(in_features=512,out_features=256),
+            nn.LeakyReLU(0.1),
+            nn.Linear(in_features=256,out_features=2)
+        ])
+
+        # self.En_Linear_weight = nn.Linear(in_features=6,out_features=1)
+        self.En_Linear_weight = nn.Sequential(*[
+            nn.Linear(in_features=6,out_features=256),
+            nn.Sigmoid(),
             nn.Linear(in_features=256,out_features=128),
             nn.LeakyReLU(0.1),
-            nn.Linear(in_features=128,out_features=2)
+            nn.Linear(in_features=128,out_features=1)
         ])
-        self.En_Linear_weight = nn.Linear(in_features=6,out_features=1)
 
     def Er_net(self,ego_y):
         delta_y = torch.tensor(list(map(lambda x:x-ego_y, self.LaneMark))).cuda()
@@ -235,7 +286,12 @@ class ff_net(nn.Module):
         Ninfo = torch.concat((Pego,Pn,dP,dP_aug,Vego,Vn,dV,dV_aug,Cn),dim=1)
         Ei = []
         for nei in Ninfo:
-            Ei.append(self.En_mlp(nei))
+            x = self.En_mlp(nei)
+            x = self.leaky_relu(x + self.En_mlp2(x))
+            # x = self.leaky_relu(x + self.En_mlp3(x))
+            # x = self.leaky_relu(x + self.En_mlp4(x))
+            x = self.En_mlp5(x)
+            Ei.append(x)
         
         En = torch.stack(Ei)
         weight = self.sfm(self.En_Linear_weight(torch.concat((En,Pn,dP),dim=1)))
@@ -245,9 +301,9 @@ class ff_net(nn.Module):
 
     def auge(self,data,cls=0):
         if cls==0:
-            sin = torch.sin(self.aug_sin0(data)) + 1e-6
+            sin = self.aug_ensin0(torch.sin(self.aug_sin0(data))) + 1e-6
         elif cls==1:
-            sin = torch.sin(self.aug_sin1(data)) + 1e-6
+            sin = self.aug_ensin1(torch.sin(self.aug_sin1(data))) + 1e-6
         sqr = data**2 + 1e-6
         cub = data**3 + 1e-6
         exp = torch.exp(data) + 1e-6
@@ -259,6 +315,7 @@ class ff_net(nn.Module):
         inv_exp = 1/exp
 
         data_aug = [data,sin,sqr,cub,exp,inv,inv_sin,inv_sqr,inv_cub,inv_exp]
+        # data_aug = [data,sin,sqr,cub,exp]
 
         return data_aug
      
@@ -273,7 +330,7 @@ class ff_net(nn.Module):
     def forward(self,data_item):
         ego_p, ego_v, Pn, Vn, Cn, Idn = data_item
 
-        Er = self.Er_net(ego_p[0,1])
-        En = self.En_net(Pn,ego_p,Vn,ego_v,Cn)
+        self.Er_density = self.Er_net(ego_p[0,1])
+        self.En_density = self.En_net(Pn,ego_p,Vn,ego_v,Cn)
         
-        return Er + En
+        return self.Er_density+self.En_density
