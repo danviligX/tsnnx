@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import random
+import copy
 
 class highD():
     def __init__(self,
@@ -193,16 +194,28 @@ class ff_net(nn.Module):
     def __init__(self):
         super(ff_net,self).__init__()
         # self.Er_net = self.gen_Er_net()
+        self.dt = 0.2
         self.leaky_relu = nn.LeakyReLU(0.1)
         self.sfm = nn.Softmax(dim=0)
         self.LaneMark = torch.tensor([13.55,17.45,21.12,24.91]).cuda()
+        self.hidden_size = 64
+        self.de_hidden = nn.Linear(in_features=self.hidden_size,out_features=2)
+
+        # LSTM Cell
+        self.sig = nn.Sigmoid()
+        self.tanh = nn.Tanh()
+        self.cell_l1 = nn.Linear(in_features=2*self.hidden_size,out_features=self.hidden_size)
+        self.cell_l2 = nn.Linear(in_features=2*self.hidden_size,out_features=self.hidden_size)
+        self.cell_l3 = nn.Linear(in_features=2*self.hidden_size,out_features=self.hidden_size)
+        self.cell_l4 = nn.Linear(in_features=2*self.hidden_size,out_features=self.hidden_size)
 
         # Er part
-        Er_basis_num = 128
+        Er_basis_num = 32
         self.Er_Linear_sel = nn.Linear(in_features=4,out_features=4)
         # self.Er_Linaer_map = nn.Linear(in_features=32+Er_basis_num*2,out_features=Er_basis_num)
         self.Er_Linaer_map = self.En_mlp = nn.Sequential(*[
-            nn.Linear(in_features=Er_basis_num*2+32,out_features=1024),
+            nn.Linear(in_features=Er_basis_num+16,out_features=1024),
+            # nn.Linear(in_features=Er_basis_num*2+32,out_features=1024),
             nn.Sigmoid(),
             nn.Linear(in_features=1024,out_features=512),
             nn.LeakyReLU(0.1),
@@ -210,20 +223,21 @@ class ff_net(nn.Module):
             nn.LeakyReLU(0.1),
             nn.Linear(in_features=128,out_features=Er_basis_num)
         ])
-        self.Er_Linaer_efc = nn.Linear(in_features=Er_basis_num,out_features=2)
+        self.Er_Linaer_efc = nn.Linear(in_features=Er_basis_num,out_features=self.hidden_size)
         self.aug_sin0 = nn.Linear(in_features=4,out_features=Er_basis_num)
         self.aug_ensin0 = nn.Linear(in_features=Er_basis_num,out_features=Er_basis_num)
 
         # En part
-        En_basis_num = 512
+        En_basis_num = 128
         self.aug_sin1 = nn.Linear(in_features=2,out_features=En_basis_num)
         self.aug_ensin1 = nn.Linear(in_features=En_basis_num,out_features=En_basis_num)
         self.En_mlp = nn.Sequential(*[
-            nn.Linear(in_features=En_basis_num*4+46,out_features=1024),
+            # nn.Linear(in_features=En_basis_num*4+46,out_features=1024),
+            nn.Linear(in_features=En_basis_num*2+30,out_features=512),
             # nn.Sigmoid(),
             # nn.Linear(in_features=1024,out_features=1024),
             nn.LeakyReLU(0.1),
-            nn.Linear(in_features=1024,out_features=1024)
+            nn.Linear(in_features=512,out_features=512)
         ])
 
         self.En_mlp2 = nn.Sequential(*[
@@ -251,22 +265,39 @@ class ff_net(nn.Module):
         # ])
 
         self.En_mlp5 = nn.Sequential(*[
-            nn.Linear(in_features=1024,out_features=512),
+            nn.Linear(in_features=512,out_features=512),
             nn.Sigmoid(),
             nn.Linear(in_features=512,out_features=256),
             nn.LeakyReLU(0.1),
-            nn.Linear(in_features=256,out_features=2)
+            nn.Linear(in_features=256,out_features=self.hidden_size)
         ])
 
         # self.En_Linear_weight = nn.Linear(in_features=6,out_features=1)
         self.En_Linear_weight = nn.Sequential(*[
-            nn.Linear(in_features=6,out_features=256),
+            nn.Linear(in_features=self.hidden_size+4,out_features=256),
             nn.Sigmoid(),
             nn.Linear(in_features=256,out_features=128),
             nn.LeakyReLU(0.1),
             nn.Linear(in_features=128,out_features=1)
         ])
 
+    def encode(self,frame):
+        ego_p, ego_v, Pn, Vn, Cn, Idn = frame
+        En_density = self.En_net(Pn,ego_p,Vn,ego_v,Cn)
+        Er_density = self.Er_net(ego_p[0,1])
+        return Er_density,En_density
+
+    def hidden_update(self,h_r,hm_r):
+        hc = torch.concat((h_r,hm_r),dim=0)
+        i = self.sig(self.cell_l1(hc))
+        f = self.sig(self.cell_l2(hc))
+        o = self.sig(self.cell_l3(hc))
+        g = self.tanh(self.cell_l4(hc))
+        c = f*hm_r + i*g
+        h = o*self.tanh(c)
+
+        return h, c
+    
     def Er_net(self,ego_y):
         delta_y = torch.tensor(list(map(lambda x:x-ego_y, self.LaneMark))).cuda()
         x = self.sfm(self.Er_Linear_sel(delta_y))*delta_y
@@ -287,7 +318,7 @@ class ff_net(nn.Module):
         Ei = []
         for nei in Ninfo:
             x = self.En_mlp(nei)
-            x = self.leaky_relu(x + self.En_mlp2(x))
+            # x = self.leaky_relu(x + self.En_mlp2(x))
             # x = self.leaky_relu(x + self.En_mlp3(x))
             # x = self.leaky_relu(x + self.En_mlp4(x))
             x = self.En_mlp5(x)
@@ -301,12 +332,12 @@ class ff_net(nn.Module):
 
     def auge(self,data,cls=0):
         if cls==0:
-            sin = self.aug_ensin0(torch.sin(self.aug_sin0(data))) + 1e-6
+            sin = self.aug_ensin0(torch.sin(self.aug_sin0(data)))
         elif cls==1:
-            sin = self.aug_ensin1(torch.sin(self.aug_sin1(data))) + 1e-6
-        sqr = data**2 + 1e-6
-        cub = data**3 + 1e-6
-        exp = torch.exp(data) + 1e-6
+            sin = self.aug_ensin1(torch.sin(self.aug_sin1(data)))
+        sqr = data**2
+        cub = data**3
+        exp = torch.exp(data)
 
         inv = 1/(data + 1e-6)
         inv_sin = 1/sin
@@ -314,8 +345,8 @@ class ff_net(nn.Module):
         inv_cub = 1/cub
         inv_exp = 1/exp
 
-        data_aug = [data,sin,sqr,cub,exp,inv,inv_sin,inv_sqr,inv_cub,inv_exp]
-        # data_aug = [data,sin,sqr,cub,exp]
+        # data_aug = [data,sin,sqr,cub,exp,inv,inv_sin,inv_sqr,inv_cub,inv_exp]
+        data_aug = [data,sin,sqr,cub,exp]
 
         return data_aug
      
@@ -327,10 +358,68 @@ class ff_net(nn.Module):
         layers.append(nn.Linear(in_features=dim_list[-2],out_features=dim_list[-1]))
         return nn.Sequential(*layers)
     
-    def forward(self,data_item):
-        ego_p, ego_v, Pn, Vn, Cn, Idn = data_item
+    # def forward(self,data_item):
+    #     ego_p, ego_v, Pn, Vn, Cn, Idn = data_item
 
-        self.Er_density = self.Er_net(ego_p[0,1])
-        self.En_density = self.En_net(Pn,ego_p,Vn,ego_v,Cn)
+    #     self.Er_density = self.Er_net(ego_p[0,1])
+    #     self.En_density = self.En_net(Pn,ego_p,Vn,ego_v,Cn)
+    #     out = self.de_hidden(self.Er_density+self.En_density)
+    #     return out
+    def gen_track(self,item):
+        track_pre = []
+        for frame in item:
+            track_pre.append(torch.concat((frame[0],frame[1]),dim=1))
+
+        Track_pre = torch.concat(track_pre,dim=0)
+        return Track_pre
+
+    def phy_cal(self,ori_pos,ori_vel,a):
+        vel = ori_vel + a*self.dt
+        pos = ori_pos + vel*self.dt
+        pos_d = ori_pos + ori_vel*self.dt + a*self.dt**2/2
+        return pos,vel,pos_d
+
+    def pre_pv(self,ho_r,ho_n,frame,ori_frame):
+        out = self.de_hidden(ho_r+ho_n)
+        ori_pos = ori_frame[0]
+        ori_vel = ori_frame[1]
+        pos,vel,_ = self.phy_cal(ori_pos,ori_vel,out)
+        frame[0][0] = pos
+        frame[1][0] = vel
+
+    def forward(self,data_item):
         
-        return self.Er_density+self.En_density
+        history = data_item[:15]
+        # print('copy started')
+        predict = copy.deepcopy(data_item[15:])
+        # print('copy complete')
+        # future = data_item[15:]
+
+        for frame in predict:
+            frame[0][0] = torch.tensor([0,0])
+            frame[1][0] = torch.tensor([0,0])
+
+        gt_track = self.gen_track(predict)
+
+        cm_r,cm_n = self.encode(history[0])
+        for frame in history[1:]:
+            hi_r, hi_n = self.encode(frame)
+
+            ho_r,cm_r = self.hidden_update(hi_r,cm_r)
+            ho_n,cm_n = self.hidden_update(hi_n,cm_n)
+        
+        self.pre_pv(ho_r,ho_n,predict[0],history[-1])
+        
+        for idx in range(1,len(predict)):
+            ori_frame = predict[idx-1]
+            frame = predict[idx]
+            hi_r, hi_n = self.encode(ori_frame)
+            ho_r,cm_r = self.hidden_update(hi_r,cm_r)
+            ho_n,cm_n = self.hidden_update(hi_n,cm_n)
+
+            self.pre_pv(ho_r,ho_n,frame,ori_frame)
+        
+        pre_track = self.gen_track(predict)
+
+
+        return pre_track,gt_track
