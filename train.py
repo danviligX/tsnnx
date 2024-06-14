@@ -11,9 +11,9 @@ def main():
     args.dt = 0.2
     args.opt = 'Adam'
     args.lr = 1e-3
-    args.batch_size = 50
+    args.batch_size = 10
     args.epoch_num = 300 # 40*300
-    args.state_dic_path = './models/Field_nn/trial_5/'
+    args.state_dic_path = './models/Field_nn/trial_10/'
     if os.path.exists(args.state_dic_path) is False: os.mkdir(args.state_dic_path)
     args.device_ids = list(range(torch.cuda.device_count()))
 
@@ -38,7 +38,7 @@ def main():
     for epoch in range(args.epoch_num):
         args.net, loss = train(args,epoch)
         error = valid(args,epoch)
-        print('NUM:{}, epoch:{}, loss:{}, error:{}, max:{}, min:{}'.format(epoch, epoch%39,loss, error.mean().item(),error.max().item(),error.min().item()))
+        print('epoch:{}, loss:{}, error:{}, max:{}, min:{}'.format(epoch,loss, error.mean().item(),error.max().item(),error.min().item()))
         torch.save(args.net.state_dict(),args.state_dic_path+'_'+str(epoch)+".mdic")
     # acc = test()
     # print(acc)
@@ -94,14 +94,20 @@ def train(args,epoch):
     opt.zero_grad()
     batch_count = 0
 
-    for item in data:
-        pre_t, rel_t = net(item)     
-        loss = criterion(pre_t,rel_t)
+    for idx,item in enumerate(data):
+        pre_t, rel_t = net(item)
+        tpr = pre_t*args.data.norm_value_scaler.cuda()+args.data.norm_value_center.cuda()
+        tpp = rel_t*args.data.norm_value_scaler.cuda()+args.data.norm_value_center.cuda()
+        loss = criterion(tpp,tpr)
+        track_pos_loss = criterion(tpp[:,:2],tpr[:,:2])
+        last_pos_loss = criterion(tpp[-1,:2],tpr[-1,:2])
+        # loss = criterion(pre_t,rel_t)
         # + criterion(tvr,tvp)
         loss.backward()
-        # print('epoch:{},loss:{}'.format(epoch,loss.item()))
-    opt.step()
-    opt.zero_grad()
+        print('epoch:{},item:{},loss:{}, track_mean:{}, last:{}'.format(epoch,idx,loss.item(),track_pos_loss.item(),last_pos_loss.item()))
+        if idx%(args.batch_size-1)==0:
+            opt.step()
+            opt.zero_grad()
     return net, loss
 
 def valid(args,epoch):
@@ -118,6 +124,7 @@ def valid(args,epoch):
             pos_rel = rel_t[-1,:2]
             tpr = pos_rel*args.data.norm_value_scaler[:2].cuda()+args.data.norm_value_center[:2].cuda()
             tpp = pos_pre*args.data.norm_value_scaler[:2].cuda()+args.data.norm_value_center[:2].cuda()
+            # tpp = pos_pre
             loss = criterion(tpp,tpr)
             error.append(loss.item())
 

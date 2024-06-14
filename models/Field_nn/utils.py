@@ -10,7 +10,7 @@ class highD():
                     tracks_path = './data/raw/13_tracks.csv',
                     recordingMeta_path = './data/raw/13_recordingMeta.csv',
                     tracksMeta_path = './data/raw/13_tracksMeta.csv',
-                    cache = False,
+                    cache = True,
                     device='cpu'
                 ) -> None:
         
@@ -399,7 +399,7 @@ class ff_net(nn.Module):
             frame[0][0] = torch.tensor([0,0])
             frame[1][0] = torch.tensor([0,0])
 
-        gt_track = self.gen_track(predict)
+        gt_track = self.gen_track(data_item[15:])
 
         cm_r,cm_n = self.encode(history[0])
         for frame in history[1:]:
