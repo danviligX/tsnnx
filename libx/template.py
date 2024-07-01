@@ -182,6 +182,7 @@ class GPT(nn.Module):
         return model
     
     def configure_optimizers(self, weight_decay, learning_rate, device):
+        # Generate an optimizer with decay learning rate.
         param_dict = {pn: p for pn, p in self.named_parameters()}
         param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
 
@@ -261,11 +262,9 @@ class DataLoaderLite:
         return x, y
 
 if __name__=='__main__':
-    
+    # ============================== Mulit GPUs ==============================
     # Multi GPUs
     # torchrun --standalone --nproc_per_node=3 train_gpt2.py
-
-    
 
     ddp = int(os.environ.get('RANK',-1)) != -1
     if ddp:
@@ -289,12 +288,15 @@ if __name__=='__main__':
             device = 'mps'
         print(f"using devices:{device}")
 
+    # ============================== Random Seed ==============================
     torch.manual_seed(1337)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(1337)
 
+    # ============================== Precision ==============================
     torch.set_float32_matmul_precision('high') # set TF32
 
+    # ============================== Batch size ==============================
     # batch size setting
     total_batch_size = 589824 #524288 # 2**19
     B = 6 # micro batch size
@@ -306,18 +308,20 @@ if __name__=='__main__':
         print(f"total desired batch size: {total_batch_size}")
         print(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
 
+    # ============================== Dataloader ==============================
     train_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split="train")
     val_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split="val")
 
-    # create models
+    # ============================== Model ==============================
     model = GPT(GPTConfig(vocab_size=50304))
     model.to(device)
-    model = torch.compile(model)
+    model = torch.compile(model) # pre-compile
     if ddp:
         model = DDP(model, device_ids=[ddp_local_rank])
     raw_model = model.module if ddp else model
 
-    # lr
+    # ============================== Learning Rate ==============================
+    # 
     max_lr = 6e-4
     min_lr = max_lr * 0.1
     warmup_steps = 715
@@ -332,12 +336,13 @@ if __name__=='__main__':
         coeff = 0.5*(1.0 + math.cos(math.pi*decay_ratio))
         return min_lr + coeff*(max_lr - min_lr)
     
-    # optimize
+    # ============================== Optimizer ==============================
     # optimizer = torch.optim.AdamW(model.parameters(),lr=3e-4,betas=(0.9,0.95),eps=1e-8)
     # import code; code.interact(local=locals()) # inter action
     optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
 
-    log_dir = "log"
+    # ============================== Log file ==============================
+    log_dir = "logs"
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, f"log.txt")
     with open(log_file,'w') as f:
@@ -367,6 +372,8 @@ if __name__=='__main__':
                 print(f"validation loss: {val_loss_accum.item():.4f}")
                 with open(log_file, "a") as f:
                     f.write(f"{step} val {val_loss_accum.item():.4f}\n")
+                
+                # ====================== Checkpoint ================================
                 if step>0 and (step%5000 == 0 or last_step):
                     checkpoint_path = os.path.join(log_dir, f"model_{step:05d}.pt")
                     checkpoint = {
@@ -376,7 +383,8 @@ if __name__=='__main__':
                         'val_loss': val_loss_accum.item()
                     }
                     torch.save(checkpoint,checkpoint_path)
-        # train loop
+        
+        # ============================== Training ==============================
         model.train()
         optimizer.zero_grad()
         loss_accum = 0.0
