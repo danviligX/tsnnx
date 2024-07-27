@@ -16,7 +16,7 @@ from torch.nn import functional as F
 
 @dataclass
 class xconfig:
-    f:int=25
+    f:int=5
     input_time:int=3
     iter_step:int=1
     ppc_cache:str='./cache/highD_ppc.pth'
@@ -24,9 +24,9 @@ class xconfig:
     hidden_size:int=2**10
 
     max_lr:float=1e-3
-    batch_size:int=2**14
-    mini_batch_size:int=512
-    max_steps:int=23072
+    batch_size:int=2**12*3
+    mini_batch_size:int=2**10
+    max_steps:int=2307242
 
 class highD:
     def __init__(self, config:xconfig):
@@ -124,7 +124,7 @@ class net(nn.Module):
     def __init__(self, config:xconfig):
         super().__init__()
         self.config = config
-        self.lstm = nn.LSTM(input_size=4, hidden_size=config.hidden_size, batch_first=True)
+        self.lstm = nn.LSTM(input_size=4, hidden_size=config.hidden_size, batch_first=True, num_layers=3, dropout=0.1)
         self.fnn = nn.Linear(in_features=config.hidden_size, out_features=2)
 
     def forward(self, x:torch.tensor, target:torch.tensor):
@@ -149,12 +149,12 @@ class net(nn.Module):
 
         num_decay_params = sum(p.numel() for p in decay_params)
         num_nodecay_params = sum(p.numel() for p in nodecay_params)
-        print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
-        print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
+        # print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
+        # print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
 
         fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and 'cuda' in device
-        print(f"using fused AdamW: {use_fused}")
+        # print(f"using fused AdamW: {use_fused}")
         optimizer = torch.optim.AdamW(optim_group, lr=learning_rate, betas=(0.9,0.95), eps=1e-8, fused=use_fused)
         return optimizer
 
@@ -186,7 +186,7 @@ if __name__=="__main__":
         print(f"using devices:{device}")
 
     # ============================== Precision ==============================
-    torch.set_float32_matmul_precision('high') # set TF32
+    # torch.set_float32_matmul_precision('high') # set TF32
 
     # ============================== Batch size ==============================
     config = xconfig
@@ -215,7 +215,7 @@ if __name__=="__main__":
     # ============================== Learning Rate ==============================
     max_lr = config.max_lr
     min_lr = max_lr * 0.1
-    warmup_steps = 715
+    warmup_steps = 2000
     max_steps = config.max_steps
     def get_lr(it):
         if it<warmup_steps:
@@ -250,8 +250,8 @@ if __name__=="__main__":
                 for _ in range(val_loss_steps):
                     x, y = val_loader.next_batch()
                     x, y = x[:,:,2:6].to(device), y[:,2:4].to(device)
-                    with torch.autocast(device_type=device, dtype=torch.bfloat16):
-                        _, loss = model(x,y)
+                    # with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                    _, loss = model(x,y)
                     loss = loss/val_loss_steps
                     val_loss_accum += loss.detach()
             
@@ -274,40 +274,40 @@ if __name__=="__main__":
                     torch.save(checkpoint,checkpoint_path)
 
         # ============================== Training ==============================
-            model.train()
-            optimizer.zero_grad()
-            loss_accum = 0.0
-            for micro_step in range(grad_accum_steps):
-                x, y = train_loader.next_batch()
-                x, y = x[:,:,2:6].to(device), y[:,2:4].to(device)
+        model.train()
+        optimizer.zero_grad()
+        loss_accum = 0.0
+        for micro_step in range(grad_accum_steps):
+            x, y = train_loader.next_batch()
+            x, y = x[:,:,2:6].to(device), y[:,2:4].to(device)
 
-                # with torch.autocast(device_type=device, dtype=torch.bfloat16):
-                _, loss = model(x,y)
-                # import code; code.interact(local=locals()) # inter action
-                loss = loss / grad_accum_steps
-                loss_accum += loss.detach()
-                if ddp:
-                    model.require_backward_grad_sync = (micro_step == grad_accum_steps - 1)
-                loss.backward()
-            
+            # with torch.autocast(device_type=device, dtype=torch.bfloat16):
+            _, loss = model(x,y)
+            # import code; code.interact(local=locals()) # inter action
+            loss = loss / grad_accum_steps
+            loss_accum += loss.detach()
             if ddp:
-                dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG)
-            
-            norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # control the norm of loss
-            lr = get_lr(step)
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = lr
+                model.require_backward_grad_sync = (micro_step == grad_accum_steps - 1)
+            loss.backward()
+        
+        if ddp:
+            dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG)
+        
+        norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # control the norm of loss
+        lr = get_lr(step)
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
 
-            optimizer.step()
+        optimizer.step()
+        
+        torch.cuda.synchronize()
+        t1 = time.time()
+        dt = (t1-t0)*1000
+        tokens_per_sec = (train_loader.batch_size * grad_accum_steps * ddp_world_size) / (t1 -t0)
+        if master_process:
+            print(f"step {step:4d} | loss: {loss_accum.item():.6f} | lr: {lr:.4e} | norm: {norm:.4f} | dt:{dt:.2f}ms | tok/sec:{tokens_per_sec:.2f}")
+            with open(log_file,"a") as f:
+                f.write(f"{step} train {loss_accum.item():.6f}\n")
             
-            torch.cuda.synchronize()
-            t1 = time.time()
-            dt = (t1-t0)*1000
-            tokens_per_sec = (train_loader.batch_size * grad_accum_steps * ddp_world_size) / (t1 -t0)
-            if master_process:
-                print(f"step {step:4d} | loss: {loss_accum.item():.6f} | lr: {lr:.4e} | norm: {norm:.4f} | dt:{dt:.2f}ms | tok/sec:{tokens_per_sec:.2f}")
-                with open(log_file,"a") as f:
-                    f.write(f"{step} train {loss_accum.item():.6f}\n")
-                
     if ddp:
         destroy_process_group()
