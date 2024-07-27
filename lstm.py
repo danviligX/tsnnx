@@ -27,6 +27,7 @@ class xconfig:
     batch_size:int=2**12*3
     mini_batch_size:int=2**10
     max_steps:int=2307242
+    warmup_steps:int=769
 
 class highD:
     def __init__(self, config:xconfig):
@@ -215,7 +216,7 @@ if __name__=="__main__":
     # ============================== Learning Rate ==============================
     max_lr = config.max_lr
     min_lr = max_lr * 0.1
-    warmup_steps = 2000
+    warmup_steps = config.warmup_steps
     max_steps = config.max_steps
     def get_lr(it):
         if it<warmup_steps:
