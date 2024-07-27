@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import torch.nn as nn
 import math
-import tiktoken
+import tiktoken # type: ignore
 from torch.nn import functional as F
 import time
 import inspect
@@ -141,7 +141,7 @@ class GPT(nn.Module):
     @classmethod
     def from_pretrained(cls, model_type):
         assert model_type in {'gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'}
-        from transformers import GPT2LMHeadModel
+        from transformers import GPT2LMHeadModel # type: ignore
         print('loading weights form pretrained gpt: %s' % model_type)
 
         config_args = {
@@ -298,9 +298,9 @@ if __name__=='__main__':
 
     # ============================== Batch size ==============================
     # batch size setting
-    total_batch_size = 589824 #524288 # 2**19
+    total_batch_size = 589824 #524288 # 2**19, batch token size
     B = 6 # micro batch size
-    T = 1024
+    T = 1024 # sequence length
     assert total_batch_size%(B*T*ddp_world_size) == 0, "make sure total_batch_size is divisible by B*T*ddp_world_size"
     grad_accum_steps = total_batch_size//(B*T*ddp_world_size)
 
@@ -321,7 +321,6 @@ if __name__=='__main__':
     raw_model = model.module if ddp else model
 
     # ============================== Learning Rate ==============================
-    # 
     max_lr = 6e-4
     min_lr = max_lr * 0.1
     warmup_steps = 715
@@ -436,7 +435,7 @@ if __name__=='__main__':
     num_retrun_sequence = 5
     max_length = 30
 
-    import tiktoken
+    import tiktoken # type: ignore
     enc = tiktoken.get_encoding('gpt2')
     tokens = enc.encode("Hello, I'm a language model,")
     tokens = torch.tensor(tokens, dtype=torch.long)
