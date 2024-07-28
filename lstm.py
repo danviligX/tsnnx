@@ -22,6 +22,8 @@ class xconfig:
     ppc_cache:str='./cache/highD_ppc.pth'
 
     hidden_size:int=2**10
+    num_layers:int=3
+    dropout_rate:float=0.1
 
     max_lr:float=1e-3 # 1e-5
     batch_size:int=2**12*3 # 1792*4*3
@@ -125,7 +127,7 @@ class net(nn.Module):
     def __init__(self, config:xconfig):
         super().__init__()
         self.config = config
-        self.lstm = nn.LSTM(input_size=4, hidden_size=config.hidden_size, batch_first=True, num_layers=3, dropout=0.1)
+        self.lstm = nn.LSTM(input_size=4, hidden_size=config.hidden_size, batch_first=True, num_layers=config.num_layers, dropout=config.dropout_rate)
         self.fnn = nn.Linear(in_features=config.hidden_size, out_features=2)
 
     def forward(self, x:torch.tensor, target:torch.tensor):
