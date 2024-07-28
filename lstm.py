@@ -23,11 +23,11 @@ class xconfig:
 
     hidden_size:int=2**10
 
-    max_lr:float=1e-3
-    batch_size:int=2**12*3
-    mini_batch_size:int=2**10
-    max_steps:int=2307242
-    warmup_steps:int=769
+    max_lr:float=1e-3 # 1e-5
+    batch_size:int=2**12*3 # 1792*4*3
+    mini_batch_size:int=2**10 # 1792:111104*torch.float32
+    max_steps:int=2307242 # 17280:1d
+    warmup_steps:int=769 # 300
 
 class highD:
     def __init__(self, config:xconfig):
@@ -148,8 +148,8 @@ class net(nn.Module):
             {'params': nodecay_params, 'weight_decay': 0.0}
         ]
 
-        num_decay_params = sum(p.numel() for p in decay_params)
-        num_nodecay_params = sum(p.numel() for p in nodecay_params)
+        # num_decay_params = sum(p.numel() for p in decay_params)
+        # num_nodecay_params = sum(p.numel() for p in nodecay_params)
         # print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
         # print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
 
@@ -264,7 +264,7 @@ if __name__=="__main__":
                     f.write(f"{step} val {val_loss_accum.item():.4f}\n")
                 
                 # ====================== Checkpoint ================================
-                if step>0 and (step%5000 == 0 or last_step):
+                if step>0 and (step%720 == 0 or last_step):
                     checkpoint_path = os.path.join(log_dir, f"model_{step:05d}.pt")
                     checkpoint = {
                         'model': raw_model.state_dict(),
