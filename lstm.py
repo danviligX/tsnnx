@@ -77,16 +77,7 @@ class highD:
             track_array = self.track.loc[self.track['id']==id, self.used_kw].values
             len_track_array = len(track_array)
             if len_track_array<div_frame: continue
-            track_array = track_array[::sample_scale]
-            # rotation and translation, set origin to (x[0], bond_center)
-            if track_array[0,3] > self.upperLaneMarkings[-1]: 
-                # direction = 2
-                track_array[:,2:8] = -track_array[:,2:8]
-                track_array[:,3] = track_array[:,3] + self.lowerLaneMarkings[-1]
-            else:
-                # direction = 1
-                track_array[:,3] = track_array[:,3] - self.upperLaneMarkings[0]
-            track_array[:,2] = track_array[:,2] - track_array[0,2] # x = x - x[0]
+            track_array = self.get_track(id=id, track_array=track_array)
 
             # split into item_len length
             _, n = track_array.shape
@@ -96,6 +87,24 @@ class highD:
         
         self.ppc_data = torch.tensor(data_set).to(torch.float32)
         torch.save(self.ppc_data,'./cache/highD_ppc.pth')
+
+    def get_track(self, id:int, track_array=None):
+        if track_array is None:
+            track_array = self.track.loc[self.track['id']==id, self.used_kw].values
+        
+        sample_scale = self.data_fr//self.config.f
+        track_array = track_array[::sample_scale]
+        # rotation and translation, set origin to (x[0], bond_center)
+        if track_array[0,3] > self.upperLaneMarkings[-1]: 
+            # direction = 2
+            track_array[:,2:8] = -track_array[:,2:8]
+            track_array[:,3] = track_array[:,3] + self.lowerLaneMarkings[-1]
+        else:
+            # direction = 1
+            track_array[:,3] = track_array[:,3] - self.upperLaneMarkings[0]
+        track_array[:,2] = track_array[:,2] - track_array[0,2] # x = x - x[0]
+
+        return track_array
 
 class DataLoaderx:
     def __init__(self, batch_size:int, process_rank:int, num_processes:int, config:xconfig, dataset:highD, split=None) -> None:
@@ -130,7 +139,7 @@ class net(nn.Module):
         self.lstm = nn.LSTM(input_size=4, hidden_size=config.hidden_size, batch_first=True, num_layers=config.num_layers, dropout=config.dropout_rate)
         self.fnn = nn.Linear(in_features=config.hidden_size, out_features=2)
 
-    def forward(self, x:torch.tensor, target:torch.tensor):
+    def forward(self, x:torch.tensor, target:torch.tensor=None):
         a, (h, c) = self.lstm(x)
         out = self.fnn(a[:,-1])
         loss = None
