@@ -12,24 +12,29 @@ import math
 import inspect
 import torch.distributed as dist
 import time
-from torch.nn import functional as F
 
 @dataclass
 class xconfig:
     f:int=5
     input_time:int=3
     iter_step:int=1
-    ppc_cache:str='./cache/highD_ppc.pth'
+
+    ppc_cache:str='./cache/highD_ppc_5.pth'
+    log_dir:str='logs/28_f5'
+    log_file:str='log.txt'
+    val_step:int=250
+    ckp_step:int=1000
+    assert ckp_step%val_step==0, f'ckp_step must can be divided by val_step'
 
     hidden_size:int=2**10
     num_layers:int=3
     dropout_rate:float=0.1
 
-    max_lr:float=1e-3 # 1e-5
-    batch_size:int=2**12*3 # 1792*4*3
-    mini_batch_size:int=2**10 # 1792:111104*torch.float32
-    max_steps:int=2307242 # 17280:1d
-    warmup_steps:int=769 # 300
+    max_lr:float=1e-4 # 1e-5
+    batch_size:int=2048*4*3 # 1792*4*3
+    mini_batch_size:int=2048*4 # 1792:111104*torch.float32
+    max_steps:int=17280 # 17280:1d
+    warmup_steps:int=250 # 300
 
 class highD:
     def __init__(self, config:xconfig):
@@ -86,7 +91,7 @@ class highD:
         data_set = np.concatenate(data_set,axis=0)
         
         self.ppc_data = torch.tensor(data_set).to(torch.float32)
-        torch.save(self.ppc_data,'./cache/highD_ppc.pth')
+        torch.save(self.ppc_data, self.config.ppc_cache)
 
     def get_track(self, id:int, track_array=None):
         if track_array is None:
@@ -137,7 +142,7 @@ class net(nn.Module):
         super().__init__()
         self.config = config
         self.lstm = nn.LSTM(input_size=4, hidden_size=config.hidden_size, batch_first=True, num_layers=config.num_layers, dropout=config.dropout_rate)
-        self.fnn = nn.Linear(in_features=config.hidden_size, out_features=2)
+        self.fnn = nn.Linear(in_features=config.hidden_size, out_features=4)
 
     def forward(self, x:torch.tensor, target:torch.tensor=None):
         a, (h, c) = self.lstm(x)
@@ -243,9 +248,9 @@ if __name__=="__main__":
     optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
 
     # ============================== Log file ==============================
-    log_dir = "logs"
+    log_dir = config.log_dir
     os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, f"log.txt")
+    log_file = os.path.join(log_dir, config.log_file)
     with open(log_file,'w') as f:
         pass
     
@@ -253,7 +258,7 @@ if __name__=="__main__":
         t0 = time.time()
         last_step = (step == max_steps - 1)
         # once in a while evaluate our validation loss
-        if step % 250 == 0 or last_step:
+        if step % config.val_step == 0 or last_step:
             model.eval()
             val_loader.reset()
             with torch.no_grad():
@@ -261,7 +266,7 @@ if __name__=="__main__":
                 val_loss_steps = 20
                 for _ in range(val_loss_steps):
                     x, y = val_loader.next_batch()
-                    x, y = x[:,:,2:6].to(device), y[:,2:4].to(device)
+                    x, y = x[:,:,2:6].to(device), y[:,2:6].to(device)
                     # with torch.autocast(device_type=device, dtype=torch.bfloat16):
                     _, loss = model(x,y)
                     loss = loss/val_loss_steps
@@ -275,7 +280,7 @@ if __name__=="__main__":
                     f.write(f"{step} val {val_loss_accum.item():.4f}\n")
                 
                 # ====================== Checkpoint ================================
-                if step>0 and (step%720 == 0 or last_step):
+                if step>0 and (step%config.ckp_step == 0 or last_step):
                     checkpoint_path = os.path.join(log_dir, f"model_{step:05d}.pt")
                     checkpoint = {
                         'model': raw_model.state_dict(),
@@ -291,7 +296,7 @@ if __name__=="__main__":
         loss_accum = 0.0
         for micro_step in range(grad_accum_steps):
             x, y = train_loader.next_batch()
-            x, y = x[:,:,2:6].to(device), y[:,2:4].to(device)
+            x, y = x[:,:,2:6].to(device), y[:,2:6].to(device)
 
             # with torch.autocast(device_type=device, dtype=torch.bfloat16):
             _, loss = model(x,y)
