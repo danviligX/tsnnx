@@ -18,9 +18,10 @@ class xconfig:
     f:int=5
     input_time:int=3
     iter_step:int=1
+    dt:float=25/f*0.04
 
-    ppc_cache:str='./cache/highD_ppc_5.pth'
-    log_dir:str='logs/28_f5'
+    ppc_cache:str='./cache/highD_ppc_change_5.pth'
+    log_dir:str='logs/29_lstm-phy_f5'
     log_file:str='log.txt'
     val_step:int=250
     ckp_step:int=1000
@@ -29,8 +30,10 @@ class xconfig:
     hidden_size:int=2**10
     num_layers:int=3
     dropout_rate:float=0.1
+    fn_out:int=2
 
-    max_lr:float=1e-4 # 1e-5
+    max_lr:float=1e-3
+    min_lr:float=max_lr*0.01
     batch_size:int=2048*4*3 # 1792*4*3
     mini_batch_size:int=2048*4 # 1792:111104*torch.float32
     max_steps:int=17280 # 17280:1d
@@ -76,9 +79,11 @@ class highD:
         id_max = int(id_max*0.9)
         self.test = id_max + 1
         self.train = id_max
-        
+
+        id_set = self.trackMeta.loc[self.trackMeta['numLaneChanges']>0,'id'].values
+        train_set = id_set[:-int(len(id_set)*0.1)]
         data_set = []
-        for id in trange(1,id_max+1):
+        for id in tqdm(train_set):
             track_array = self.track.loc[self.track['id']==id, self.used_kw].values
             len_track_array = len(track_array)
             if len_track_array<div_frame: continue
@@ -118,12 +123,16 @@ class DataLoaderx:
         self.num_process = num_processes
 
         assert split in {"train", "val"}
+        self.split = split
         self.data = dataset
         self.reset()
     
     def reset(self):
-        self.current_id = 0
-        self.current_point = self.batch_size * self.process_rank
+        if self.split == 'train':
+            self.current_point = self.batch_size * self.process_rank
+        if self.split == 'val':
+            self.current_point = -len(self.data.ppc_data)%self.batch_size * self.process_rank
+            
     
     def next_batch(self):
         batch_size = self.batch_size
@@ -141,15 +150,27 @@ class net(nn.Module):
     def __init__(self, config:xconfig):
         super().__init__()
         self.config = config
+        self.dt = config.dt
         self.lstm = nn.LSTM(input_size=4, hidden_size=config.hidden_size, batch_first=True, num_layers=config.num_layers, dropout=config.dropout_rate)
-        self.fnn = nn.Linear(in_features=config.hidden_size, out_features=4)
+        self.fnn = nn.Linear(in_features=config.hidden_size, out_features=config.fn_out)
+        # self.criterion = nn.SmoothL1Loss(reduction='sum')
 
     def forward(self, x:torch.tensor, target:torch.tensor=None):
         a, (h, c) = self.lstm(x)
-        out = self.fnn(a[:,-1])
+        a = self.fnn(a[:,-1])
+
+        # accelration -> position
+        v = x[:,-1,2:] + a*self.dt
+        s = x[:,-1,:2] + v*self.dt
+
+        # out = torch.concat((s,v))
+        out = torch.concat((s,v,a),dim=1)
+
         loss = None
         if target is not None:
             loss = nn.functional.mse_loss(out,target)
+            # loss = nn.functional.l1_loss(out,target,reduction='sum')/self.config.batch_size
+            # loss = nn.functional.l1_loss(out,target)
         return out, loss
     
     def configure_optimizers(self, weight_decay, learning_rate, device):
@@ -175,7 +196,7 @@ class net(nn.Module):
         optimizer = torch.optim.AdamW(optim_group, lr=learning_rate, betas=(0.9,0.95), eps=1e-8, fused=use_fused)
         return optimizer
 
-if __name__=="__main__":
+def main():
     # ============================== Mulit GPUs ==============================
     # Multi GPUs
     # torchrun --standalone --nproc_per_node=3 train_gpt2.py
@@ -231,7 +252,7 @@ if __name__=="__main__":
 
     # ============================== Learning Rate ==============================
     max_lr = config.max_lr
-    min_lr = max_lr * 0.1
+    min_lr = config.min_lr
     warmup_steps = config.warmup_steps
     max_steps = config.max_steps
     def get_lr(it):
@@ -266,7 +287,7 @@ if __name__=="__main__":
                 val_loss_steps = 20
                 for _ in range(val_loss_steps):
                     x, y = val_loader.next_batch()
-                    x, y = x[:,:,2:6].to(device), y[:,2:6].to(device)
+                    x, y = x[:,:,2:6].to(device), y[:,2:8].to(device)
                     # with torch.autocast(device_type=device, dtype=torch.bfloat16):
                     _, loss = model(x,y)
                     loss = loss/val_loss_steps
@@ -296,7 +317,7 @@ if __name__=="__main__":
         loss_accum = 0.0
         for micro_step in range(grad_accum_steps):
             x, y = train_loader.next_batch()
-            x, y = x[:,:,2:6].to(device), y[:,2:6].to(device)
+            x, y = x[:,:,2:6].to(device), y[:,2:8].to(device)
 
             # with torch.autocast(device_type=device, dtype=torch.bfloat16):
             _, loss = model(x,y)
@@ -328,3 +349,6 @@ if __name__=="__main__":
             
     if ddp:
         destroy_process_group()
+
+if __name__=="__main__":
+    main()
