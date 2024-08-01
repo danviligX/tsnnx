@@ -21,7 +21,7 @@ class xconfig:
     dt:float=25/f*0.04
 
     ppc_cache:str='./cache/highD_ppc_change_5.pth'
-    log_dir:str='logs/29_lstm-phy_f5'
+    log_dir:str='logs/29_lstm-phy_f5_L1'
     log_file:str='log.txt'
     val_step:int=250
     ckp_step:int=1000
@@ -31,12 +31,13 @@ class xconfig:
     num_layers:int=3
     dropout_rate:float=0.1
     fn_out:int=2
+    input_size:int=14
 
     max_lr:float=1e-3
-    min_lr:float=max_lr*0.01
-    batch_size:int=2048*4*3 # 1792*4*3
-    mini_batch_size:int=2048*4 # 1792:111104*torch.float32
-    max_steps:int=17280 # 17280:1d
+    min_lr:float=max_lr*0.1
+    batch_size:int=2048*2*3 # 1792*4*3
+    mini_batch_size:int=2048 # 1792:111104*torch.float32
+    max_steps:int=34000 # 17280:1d
     warmup_steps:int=250 # 300
 
 class highD:
@@ -48,6 +49,12 @@ class highD:
         self.item_len = self.input_len + self.iter_step
 
         self.load_files()
+
+        id_set = self.trackMeta.loc[self.trackMeta['numLaneChanges']>0,'id'].values
+        train_set = id_set[:-int(len(id_set)*0.1)]
+        self.train_set = train_set
+        self.test_set = id_set[-int(len(id_set)*0.1):]
+
         if os.path.exists(config.ppc_cache):
             self.ppc_data = torch.load(config.ppc_cache)
         else:
@@ -74,16 +81,9 @@ class highD:
         assert self.data_fr%self.config.f==0, "make sure data frame rate is divisible by input frame rate"
         sample_scale = self.data_fr//self.config.f
         div_frame = self.data_fr * self.config.input_time + self.iter_step * sample_scale
-
-        id_max = max(self.track['id'])
-        id_max = int(id_max*0.9)
-        self.test = id_max + 1
-        self.train = id_max
-
-        id_set = self.trackMeta.loc[self.trackMeta['numLaneChanges']>0,'id'].values
-        train_set = id_set[:-int(len(id_set)*0.1)]
+     
         data_set = []
-        for id in tqdm(train_set):
+        for id in tqdm(self.train_set):
             track_array = self.track.loc[self.track['id']==id, self.used_kw].values
             len_track_array = len(track_array)
             if len_track_array<div_frame: continue
@@ -136,13 +136,14 @@ class DataLoaderx:
     
     def next_batch(self):
         batch_size = self.batch_size
+
+        if self.current_point + (batch_size*self.num_process + 1) > len(self.data.ppc_data):
+            self.current_point = batch_size * self.process_rank
+
         self.current_point += batch_size*self.num_process
         buf = self.data.ppc_data[self.current_point:self.current_point + batch_size + 1]
         x = buf[:,:-1]
         y = buf[:,-1]
-
-        if self.current_point + (batch_size*self.num_process + 1) > len(self.data.ppc_data):
-            self.current_point = batch_size * self.process_rank
 
         return x, y
 
@@ -151,7 +152,7 @@ class net(nn.Module):
         super().__init__()
         self.config = config
         self.dt = config.dt
-        self.lstm = nn.LSTM(input_size=4, hidden_size=config.hidden_size, batch_first=True, num_layers=config.num_layers, dropout=config.dropout_rate)
+        self.lstm = nn.LSTM(input_size=config.input_size, hidden_size=config.hidden_size, batch_first=True, num_layers=config.num_layers, dropout=config.dropout_rate)
         self.fnn = nn.Linear(in_features=config.hidden_size, out_features=config.fn_out)
         # self.criterion = nn.SmoothL1Loss(reduction='sum')
 
@@ -160,17 +161,18 @@ class net(nn.Module):
         a = self.fnn(a[:,-1])
 
         # accelration -> position
-        v = x[:,-1,2:] + a*self.dt
+        v = x[:,-1,2:4] + a*self.dt
         s = x[:,-1,:2] + v*self.dt
 
         # out = torch.concat((s,v))
         out = torch.concat((s,v,a),dim=1)
+        # out = a
 
         loss = None
         if target is not None:
-            loss = nn.functional.mse_loss(out,target)
+            # loss = nn.functional.mse_loss(out,target)
             # loss = nn.functional.l1_loss(out,target,reduction='sum')/self.config.batch_size
-            # loss = nn.functional.l1_loss(out,target)
+            loss = nn.functional.l1_loss(out,target)
         return out, loss
     
     def configure_optimizers(self, weight_decay, learning_rate, device):
@@ -222,6 +224,10 @@ def main():
         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             device = 'mps'
         print(f"using devices:{device}")
+
+    # threads setting
+    # torch.set_num_threads(3)
+    # export OMP_NUM_THREADS=6
 
     # ============================== Precision ==============================
     # torch.set_float32_matmul_precision('high') # set TF32
@@ -287,7 +293,7 @@ def main():
                 val_loss_steps = 20
                 for _ in range(val_loss_steps):
                     x, y = val_loader.next_batch()
-                    x, y = x[:,:,2:6].to(device), y[:,2:8].to(device)
+                    x, y = x[:,:,2:-1].to(device), y[:,2:8].to(device)
                     # with torch.autocast(device_type=device, dtype=torch.bfloat16):
                     _, loss = model(x,y)
                     loss = loss/val_loss_steps
@@ -317,7 +323,7 @@ def main():
         loss_accum = 0.0
         for micro_step in range(grad_accum_steps):
             x, y = train_loader.next_batch()
-            x, y = x[:,:,2:6].to(device), y[:,2:8].to(device)
+            x, y = x[:,:,2:-1].to(device), y[:,2:8].to(device)
 
             # with torch.autocast(device_type=device, dtype=torch.bfloat16):
             _, loss = model(x,y)
