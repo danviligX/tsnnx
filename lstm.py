@@ -171,7 +171,6 @@ class net(nn.Module):
         loss = None
         if target is not None:
             # loss = nn.functional.mse_loss(out,target)
-            # loss = nn.functional.l1_loss(out,target,reduction='sum')/self.config.batch_size
             loss = nn.functional.l1_loss(out,target)
         return out, loss
     
@@ -252,8 +251,7 @@ def main():
     model = net(config=config)
     model.to(device)
     model = torch.compile(model) # pre-compile
-    if ddp:
-        model = DDP(model, device_ids=[ddp_local_rank])
+    if ddp: model = DDP(model, device_ids=[ddp_local_rank])
     raw_model = model.module if ddp else model
 
     # ============================== Learning Rate ==============================
@@ -299,8 +297,7 @@ def main():
                     loss = loss/val_loss_steps
                     val_loss_accum += loss.detach()
             
-            if ddp:
-                dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
+            if ddp: dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
             if master_process:
                 print(f"validation loss: {val_loss_accum.item():.4f}")
                 with open(log_file, "a") as f:
@@ -330,17 +327,14 @@ def main():
             # import code; code.interact(local=locals()) # inter action
             loss = loss / grad_accum_steps
             loss_accum += loss.detach()
-            if ddp:
-                model.require_backward_grad_sync = (micro_step == grad_accum_steps - 1)
+            if ddp: model.require_backward_grad_sync = (micro_step == grad_accum_steps - 1)
             loss.backward()
         
-        if ddp:
-            dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG)
+        if ddp: dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG)
         
         norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # control the norm of loss
         lr = get_lr(step)
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
+        for param_group in optimizer.param_groups: param_group['lr'] = lr
 
         optimizer.step()
         
@@ -353,8 +347,6 @@ def main():
             with open(log_file,"a") as f:
                 f.write(f"{step} train {loss_accum.item():.6f}\n")
             
-    if ddp:
-        destroy_process_group()
+    if ddp: destroy_process_group()
 
-if __name__=="__main__":
-    main()
+if __name__=="__main__": main()
