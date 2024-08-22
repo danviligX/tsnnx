@@ -4,7 +4,7 @@ import torch.nn as nn
 class xconfig:
     batch_size: int=32
     neighbors_num: int=8
-    delta_time: float=0.02
+    dt: float=0.02
     embd: int=16
     select_lane: list=[0,-1] # two borders of a highway road
 
@@ -88,9 +88,9 @@ class SFM(nn.Module):
         '''
         recording_time = self.recording_time
         config = self.config
-        delta_time = config.delta_time
+        delta_time = config.dt
         # Calculate the distance
-        r = nei[:,:,1:3] - ego[:,1:3].unsqueeze(1)
+        r = nei[:,:,1:3] - ego[:,1:3].unsqueeze(0)
        
         temp = []
         for i in range(self.config.batch_size):
