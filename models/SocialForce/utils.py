@@ -58,8 +58,7 @@ class SFM(nn.Module):
 
     def attr_destination(self, ego:torch.Tensor, desired_velocity:torch.Tensor=None):
         '''
-        N: batch size
-        ego:Nx16: [ 'id',
+        ego: (batch_size, num_features): [ 'id',
                     'x',
                     'y',
                     'xVelocity',
@@ -83,47 +82,39 @@ class SFM(nn.Module):
         return (vx/self.attr_destination_para[0]).unsqueeze(1)
 
     def attr_repu_neighbors(self, ego:torch.Tensor, nei:torch.Tensor):
-        '''
-        nei:Nx8x16: 8 x type(ego)
-        '''
-        recording_time = self.recording_time
-        config = self.config
-        delta_time = config.dt
-        # Calculate the distance
-        r = nei[:,:,1:3] - ego[:,1:3].unsqueeze(0)
-       
-        temp = []
-        for i in range(self.config.batch_size):
-            # If neighbors exists
-            temp.append((torch.isin(nei[i,:,0], ego[i,7:-1]))&(nei[i,:,0]!=0))
+        """
+        Compute the reputations of neighbors of ego node based on their positions.
+        ego: (batch_size, num_frames, num_features)
+        nei: (batch_size, num_neighbors, num_features)
+        """
+        dt = self.config.dt
 
-            # Time delation: store time delation into self.recording_time
-            ifin = torch.isin(recording_time[i,:,0],nei[i,:,0])
-            recording_time[i,ifin,1]+=1
-            reamin = recording_time[i,ifin]
-            ifnew = (torch.isin(nei[i,:,0],recording_time[i,:,0])==False)&(nei[i,:,0]!=0)
-            new_m = torch.stack((nei[i,ifnew,0],torch.ones_like(nei[i,ifnew,0])),dim=1)
-            recording_time[i] = torch.concat((reamin,new_m,torch.ones([config.neighbors_num-len(reamin)-len(new_m),2])))
+        r = nei[:,:,1:3] - ego[:,-1,None,1:3]
+        mask = nei[:,:,1:3]==0
 
-        idx = torch.stack(temp)
-        r[idx==False]=0 # Zerolize it if there is no neighbors
         r_norm = r.norm(dim=-1).unsqueeze(-1)
-        f_attr = self.delation_time_f(self.recording_time[:,:,1,None]) * self.attr_nei_f(r_norm) *r/r_norm
-        v_nei = nei[:,:,3:5]
-        b = r_norm + (r + v_nei*delta_time).norm(dim=-1).unsqueeze(-1)**2 - (v_nei*delta_time).norm(dim=-1).unsqueeze(-1)**2
-        b = (b**0.5)/2
-        force_scale = self.repu_nei_f(b)
-        f_repu = force_scale * r/r_norm
+        
+        # calculate the durality of neighbors
+        nei_durality = torch.zeros(8)
+        for i in ego[1,:,8:-1]:
+            nei_durality+=torch.isin(ego[1,-1,8:-1],i).float()
 
-        # If there is no neighbor
-        f_attr[idx==False]=0
-        f_repu[idx==False]=0
+        # calculate the attraction and repulsion forces
+        f_attr = self.attr_nei_f(r_norm)*r/r_norm*self.delation_time_f(nei_durality.unsqueeze(-1))
+        f_attr[mask]=0
+
+        v_nei = nei[:,:,3:5]
+        b = r_norm + (r + v_nei*dt).norm(dim=-1).unsqueeze(-1)**2 - (v_nei*dt).norm(dim=-1).unsqueeze(-1)**2
+        b = (b**0.5)/2
+        f_repu = self.repu_nei_f(b)*r/r_norm
+        f_repu[mask]=0
+
         return f_attr, f_repu
 
     def repu_borders(self, ego:torch.Tensor, border:torch.Tensor):
         '''
         A special function for HighD data. This function only calculates the force from y-axis, since HighD data is about highway.
-        border: dim=1: (4.) for highd_13 set
+        border: (border_num, )
         '''
         select_lane = self.config.select_lane
         r = (ego[:,2,None] - border)[:,select_lane]
@@ -133,11 +124,11 @@ class SFM(nn.Module):
         return f_repu
 
     def cal_force(self, ego:torch.Tensor, nei:torch.Tensor, border:torch.Tensor, desired_velocity:torch.Tensor=None):
-        f_attr_destination = self.attr_destination(ego, desired_velocity)
+        f_attr_destination = self.attr_destination(ego[:,-1], desired_velocity)
         f_attr_nei, f_repu_nei = self.attr_repu_neighbors(ego, nei)
-        f_repu_border = self.repu_borders(ego, border)
+        f_repu_border = self.repu_borders(ego[:,-1], border)
 
-        e = ego[:,3:5].norm(dim=-1)
+        e = ego[:,-1,3:5].norm(dim=-1)
         f_attr_destination_clamped = self.angle_clamp(f_attr_destination, e)
         f_attr_nei_clamped = self.angle_clamp(f_attr_nei, e)
         f_repu_nei_clamped = self.angle_clamp(f_repu_nei, e)
@@ -147,7 +138,7 @@ class SFM(nn.Module):
         f_neighors = f_attr_nei_clamped.sum(dim=1) + f_repu_nei_clamped.sum(dim=1)
         f_border = f_repu_border_clampled.sum(dim=1)
 
-        
+        return f_destination, f_neighors, f_border
 
 
     def angle_clamp(self, vector:torch.Tensor, target:torch.Tensor):
