@@ -141,7 +141,7 @@ class DataLoaderx:
             self.current_point = batch_size * self.process_rank
 
         self.current_point += batch_size*self.num_process
-        buf = self.data.ppc_data[self.current_point:self.current_point + batch_size + 1]
+        buf = self.data.ppc_data[self.current_point:self.current_point + batch_size]
         x = buf[:,:-1]
         y = buf[:,-1]
 
