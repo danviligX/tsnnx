@@ -57,8 +57,6 @@ class highD:
 
         if os.path.exists(config.ppc_cache):
             self.ppc_data = torch.load(config.ppc_cache)
-        else:
-            self.preprocess()
         
     def load_files(self,
                     tracks_path = './data/raw/13_tracks.csv',
@@ -244,6 +242,9 @@ def main():
     
     # ============================== Dataloader ==============================
     data = highD(config=config)
+    if not config.ppc_cache and master_process:
+        data.preprocess()
+        
     train_loader = DataLoaderx(batch_size=m_batch_size, process_rank=ddp_rank, num_processes=ddp_world_size, split="train", config=config, dataset=data)
     val_loader = DataLoaderx(batch_size=m_batch_size, process_rank=ddp_rank, num_processes=ddp_world_size, split="val", config=config, dataset=data)
 
