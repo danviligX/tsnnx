@@ -15,13 +15,13 @@ class config_SFM:
     # embd: int=16
     select_lane: list=[0,-1] # two borders of a highway road
 
-    batch_size: int = 128
+    batch_size: int = 256*3*4
     max_lr: float = 0.001
     min_lr: float = 0.00001
     warmup_steps: int = 30
     max_steps: int = 1000
 
-    mini_batch_size = 128
+    mini_batch_size = 256
     val_step: int = 100
     ckp_step: int = 1000
     assert ckp_step % val_step == 0, f"ckp_step should be a multiple of val_step, but got {ckp_step} and {val_step}"
@@ -29,11 +29,11 @@ class config_SFM:
     # preprocessed data path, lane changed data, with 5Hz sampling rate
     ppc_cache: str = './cache/highD_ppc_change_5.pth'
 
-    log_file: str = './cache'
-    log_dir: str = 'log.txt'
+    log_file: str = 'log2.txt'
+    log_dir: str = './logs/sfm'
 
     neighbors_num: int = 8
-    embd: int = 16
+    embd: int = 32
 
 class weightConstraint(object):
     def __init__(self, min_b:float=None, max_b:float=None):       
@@ -56,7 +56,7 @@ class monotonic_fun(nn.Module):
         self.increasing = increasing
     def forward(self,x:torch.Tensor):
         x = self.in_linear(x)
-        x = torch.exp(x) if self.increasing else torch.exp(-x)
+        x = torch.relu(x) if self.increasing else torch.relu(-x)
         x = self.out_linear(x)
         return x
 
@@ -176,7 +176,7 @@ class SFM(nn.Module):
     def angle_clamp(self, vector:torch.Tensor, target:torch.Tensor):
         index = torch.cosine_similarity(target.repeat(vector.shape[1],1,1).transpose(0,1),vector,dim=-1).abs() > self.effective_angle
         batched_force = []
-        for i in range(self.config.batch_size):
+        for i in range(len(index)):
             force = vector[i,index[i]].sum(dim=0)
             batched_force.append(force)
         batched_force = torch.stack(batched_force)
