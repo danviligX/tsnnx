@@ -3,7 +3,7 @@ import torch.nn as nn
 import inspect
 import numpy as np
 
-class config_SFM:
+class xconfig:
     f:int=5
     input_time:int=3
     iter_step:int=1
@@ -15,7 +15,7 @@ class config_SFM:
     # embd: int=16
     select_lane: list=[0,-1] # two borders of a highway road
 
-    batch_size: int = 256*3*4
+    batch_size: int = 256*3
     max_lr: float = 0.001
     min_lr: float = 0.00001
     warmup_steps: int = 30
@@ -49,7 +49,7 @@ class weightConstraint(object):
             module.weight.data = w
 
 class monotonic_fun(nn.Module):
-    def __init__(self, config:config_SFM, increasing=False) -> None:
+    def __init__(self, config:xconfig, increasing=False) -> None:
         super().__init__()
         self.in_linear = nn.Linear(1,config.embd)
         self.out_linear= nn.Linear(config.embd,1)
@@ -61,7 +61,7 @@ class monotonic_fun(nn.Module):
         return x
 
 class SFM(nn.Module):
-    def __init__(self, config:config_SFM) -> None:
+    def __init__(self, config:xconfig) -> None:
         super().__init__()
         '''
         requires: frames with ego and neighbors information
